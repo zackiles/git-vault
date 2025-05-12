@@ -1,0 +1,57 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    devDependencies:
+      bats-assert:
+        specifier: ^2.0.0
+        version: 2.0.0(bats-support@0.3.0(bats@1.11.1))
+      bats-file:
+        specifier: git+https://github.com/bats-core/bats-file.git#v0.3.0
+        version: https://codeload.github.com/bats-core/bats-file/tar.gz/c128a1de53ba4a811835af410ce427f1049e2d7f(bats-support@0.3.0(bats@1.11.1))
+      bats-support:
+        specifier: ^0.3.0
+        version: 0.3.0(bats@1.11.1)
+
+packages:
+
+  bats-assert@2.0.0:
+    resolution: {integrity: sha512-qO3kNilWxW8iCONu9NDUfvsCiC6JzL6DPOc/DGq9z3bZ9/A7wURJ+FnFMxGbofOmWbCoy7pVhofn0o47A95qkQ==}
+    peerDependencies:
+      bats-support: git+https://github.com/ztombol/bats-support.git#v0.2.0
+
+  bats-file@https://codeload.github.com/bats-core/bats-file/tar.gz/c128a1de53ba4a811835af410ce427f1049e2d7f:
+    resolution: {tarball: https://codeload.github.com/bats-core/bats-file/tar.gz/c128a1de53ba4a811835af410ce427f1049e2d7f}
+    version: 0.2.0
+    peerDependencies:
+      bats-support: git+https://github.com/ztombol/bats-support.git#v0.3.0
+
+  bats-support@0.3.0:
+    resolution: {integrity: sha512-z+2WzXbI4OZgLnynydqH8GpI3+DcOtepO66PlK47SfEzTkiuV9hxn9eIQX+uLVFbt2Oqoc7Ky3TJ/N83lqD+cg==}
+    peerDependencies:
+      bats: 0.4 || ^1
+
+  bats@1.11.1:
+    resolution: {integrity: sha512-Dh26FsiLog+wwQeTkboYo2xYj9rUaPEbibUobnYb3G3M9hva/Kby00wrAN9VB9qqGVhl/pYjjt/LVBWwjXlD2A==}
+    hasBin: true
+
+snapshots:
+
+  bats-assert@2.0.0(bats-support@0.3.0(bats@1.11.1)):
+    dependencies:
+      bats-support: 0.3.0(bats@1.11.1)
+
+  bats-file@https://codeload.github.com/bats-core/bats-file/tar.gz/c128a1de53ba4a811835af410ce427f1049e2d7f(bats-support@0.3.0(bats@1.11.1)):
+    dependencies:
+      bats-support: 0.3.0(bats@1.11.1)
+
+  bats-support@0.3.0(bats@1.11.1):
+    dependencies:
+      bats: 1.11.1
+
+  bats@1.11.1: {}
