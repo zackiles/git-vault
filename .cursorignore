@@ -1,0 +1,2 @@
+# Let Cursor see it, because it's ignored by .gitignore
+!ai/context/codebase-summary.xml
