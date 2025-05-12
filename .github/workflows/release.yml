@@ -28,7 +28,7 @@ jobs:
         run: |
           git clone https://github.com/bats-core/bats-core.git
           cd bats-core
-          ./install.sh /usr/local
+          sudo ./install.sh /usr/local
 
       - name: Run tests
         run: bats test
@@ -73,4 +73,4 @@ jobs:
             release_assets/README.md
             release_assets/LICENSE
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
