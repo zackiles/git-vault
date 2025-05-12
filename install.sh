@@ -7,6 +7,8 @@ GITHUB_RELEASE_BASE_URL="${GIT_VAULT_RELEASE_URL:-https://github.com/zacharyiles
 EMBEDDED_PATHS_LIST="# Git-Vault Managed Paths
 # Format: <file-path>#<hash>
 # Do not edit manually"
+# Default LFS threshold in MB
+DEFAULT_LFS_THRESHOLD=5
 
 # --- Helper Functions ---
 # Downloads a file from GitHub releases if not found locally
@@ -51,6 +53,7 @@ download_or_use_local() {
 
 # --- Parse Arguments ---
 TARGET_DIR=""
+LFS_THRESHOLD=$DEFAULT_LFS_THRESHOLD
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -t|--target-dir)
@@ -61,9 +64,25 @@ while [ "$#" -gt 0 ]; do
       TARGET_DIR="$2"
       shift 2
       ;;
+    --min-lfs=*)
+      LFS_THRESHOLD="${1#*=}"
+      if ! [[ "$LFS_THRESHOLD" =~ ^[0-9]+$ ]]; then
+        echo "Error: --min-lfs requires a positive integer value in MB" >&2
+        exit 1
+      fi
+      shift
+      ;;
+    --min-lfs)
+      if [ -z "$2" ] || ! [[ "$2" =~ ^[0-9]+$ ]]; then
+        echo "Error: $1 requires a positive integer value in MB" >&2
+        exit 1
+      fi
+      LFS_THRESHOLD="$2"
+      shift 2
+      ;;
     *)
       echo "Error: Unknown option $1" >&2
-      echo "Usage: $0 [--target-dir|-t <directory>]" >&2
+      echo "Usage: $0 [--target-dir|-t <directory>] [--min-lfs=<size-in-MB>]" >&2
       exit 1
       ;;
   esac
@@ -95,6 +114,7 @@ cd "$TARGET_REPO_ROOT" || exit 1
 TARGET_GIT_VAULT_DIR=".git-vault"
 STORAGE_DIR="$TARGET_GIT_VAULT_DIR/storage"
 TARGET_MANIFEST="$TARGET_GIT_VAULT_DIR/paths.list"
+LFS_CONFIG_FILE="$TARGET_GIT_VAULT_DIR/lfs-config"
 GIT_DIR=$(git -C "$TARGET_REPO_ROOT" rev-parse --git-dir) # Usually .git, but could be elsewhere
 
 # Check for custom hooks path
@@ -164,6 +184,48 @@ STORAGE_DIR_REL="$TARGET_GIT_VAULT_DIR_REL/storage"  # Update to use new storage
 if grep -q "^$STORAGE_DIR_REL" "$GITIGNORE_FILE"; then
     echo "WARNING: '$STORAGE_DIR_REL/' is ignored in .gitignore but MUST be tracked."
     echo "        Please modify your .gitignore to ensure '$STORAGE_DIR_REL/' is not ignored."
+fi
+
+# --- Git LFS Setup ---
+echo "Checking for Git LFS support..."
+# Save the LFS threshold to config file for use by other scripts
+echo "$LFS_THRESHOLD" > "$TARGET_REPO_ROOT/$LFS_CONFIG_FILE"
+echo "LFS threshold set to ${LFS_THRESHOLD}MB (stored in $LFS_CONFIG_FILE)"
+
+# Check if git-lfs is available
+if command -v git-lfs >/dev/null 2>&1; then
+  echo "Git LFS detected. Setting up LFS for git-vault..."
+
+  # Initialize Git LFS in the repository if not already done
+  if ! git -C "$TARGET_REPO_ROOT" lfs version >/dev/null 2>&1; then
+    git -C "$TARGET_REPO_ROOT" lfs install --local
+    echo "Git LFS initialized in the repository."
+  else
+    echo "Git LFS already initialized in the repository."
+  fi
+
+  # Create a .gitattributes file if it doesn't exist
+  GITATTRIBUTES_FILE="$TARGET_REPO_ROOT/.gitattributes"
+  touch "$GITATTRIBUTES_FILE"
+
+  # Add the LFS tracking pattern for archives
+  LFS_PATTERN="$STORAGE_DIR_REL/*.tar.gz.gpg filter=lfs diff=lfs merge=lfs -text"
+  if ! grep -qxF "$LFS_PATTERN" "$GITATTRIBUTES_FILE"; then
+    echo "# Git-Vault LFS tracking for large encrypted archives" >> "$GITATTRIBUTES_FILE"
+    echo "$LFS_PATTERN" >> "$GITATTRIBUTES_FILE"
+    echo "Added LFS tracking for encrypted archives to .gitattributes"
+
+    # Stage .gitattributes for commit
+    git -C "$TARGET_REPO_ROOT" add "$GITATTRIBUTES_FILE" > /dev/null 2>&1 || true
+  else
+    echo "LFS tracking for git-vault archives already configured in .gitattributes"
+  fi
+else
+  echo "Git LFS not detected. Large files will be stored directly in Git."
+  echo "To use Git LFS for improved handling of large archives:"
+  echo "  1. Install Git LFS (https://git-lfs.github.com/)"
+  echo "  2. Run: git lfs install"
+  echo "  3. Reinstall git-vault to enable LFS integration"
 fi
 
 # --- Git Hook Installation Function ---
@@ -248,6 +310,13 @@ echo "Git-Vault installation complete."
 echo "Usage:"
 echo "  Add a path:    $TARGET_GIT_VAULT_DIR_REL/add.sh <relative-path-to-file-or-dir>"
 echo "  Remove a path: $TARGET_GIT_VAULT_DIR_REL/remove.sh <relative-path-to-file-or-dir>"
+echo ""
+if command -v git-lfs >/dev/null 2>&1; then
+  echo "Git LFS is configured with a threshold of ${LFS_THRESHOLD}MB."
+  echo "Archives larger than this size will be managed by Git LFS automatically."
+else
+  echo "Git LFS is not available. Install Git LFS for better management of large archives."
+fi
 echo ""
 echo "Remember to commit changes to .gitignore and the $TARGET_GIT_VAULT_DIR_REL/ directory."
 

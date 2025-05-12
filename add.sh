@@ -43,6 +43,7 @@ SCRIPT_DIR=$(dirname "$0")
 GIT_VAULT_DIR=".git-vault"
 STORAGE_DIR="$GIT_VAULT_DIR/storage"
 PATHS_FILE="$GIT_VAULT_DIR/paths.list"
+LFS_CONFIG_FILE="$GIT_VAULT_DIR/lfs-config"
 
 # Ensure paths file exists
 [ -f "$PATHS_FILE" ] || touch "$PATHS_FILE"
@@ -102,6 +103,70 @@ echo "$PASSWORD" | gpg --batch --yes --passphrase-fd 0 -c -o "$ARCHIVE_FILE" "$T
 echo "$PASSWORD" > "$PW_FILE"
 chmod 600 "$PW_FILE"  # Secure the password file
 
+# --- LFS handling for large archives ---
+# Check if LFS config exists and read threshold
+LFS_THRESHOLD=5 # Default 5MB if config file doesn't exist
+if [ -f "$LFS_CONFIG_FILE" ]; then
+  LFS_THRESHOLD=$(cat "$LFS_CONFIG_FILE")
+fi
+
+# Get archive size in MB (rounded up for comparison)
+# du shows sizes in blocks, so we need to convert to bytes and then to MB
+if command -v du >/dev/null 2>&1; then
+  if du --help 2>&1 | grep -q '\--block-size'; then
+    # GNU du (Linux)
+    ARCHIVE_SIZE=$(du --block-size=1M "$ARCHIVE_FILE" | cut -f1)
+  else
+    # BSD du (macOS)
+    ARCHIVE_SIZE=$(du -m "$ARCHIVE_FILE" | cut -f1)
+  fi
+else
+  # Fallback if du is not available (unlikely)
+  ARCHIVE_SIZE=$(($(stat -c%s "$ARCHIVE_FILE" 2>/dev/null || stat -f%z "$ARCHIVE_FILE") / 1024 / 1024))
+fi
+
+# Check if we should use LFS based on archive size and availability
+if [ "$ARCHIVE_SIZE" -ge "$LFS_THRESHOLD" ]; then
+  echo "Archive size (${ARCHIVE_SIZE}MB) exceeds LFS threshold (${LFS_THRESHOLD}MB)."
+
+  if command -v git-lfs >/dev/null 2>&1; then
+    echo "Using Git LFS for this archive."
+
+    # Check if git-lfs is initialized in the repo
+    if ! git lfs version >/dev/null 2>&1; then
+      echo "Initializing Git LFS in the repository."
+      git lfs install --local
+    fi
+
+    # Create or update .gitattributes file
+    GITATTRIBUTES_FILE=".gitattributes"
+    touch "$GITATTRIBUTES_FILE"
+
+    # Create a specific pattern for this file if it's not covered by wildcard
+    LFS_WILDCARD_PATTERN="$STORAGE_DIR/*.tar.gz.gpg filter=lfs diff=lfs merge=lfs -text"
+    LFS_SPECIFIC_PATTERN="$ARCHIVE_FILE filter=lfs diff=lfs merge=lfs -text"
+
+    # Check if we need to add a specific pattern (if wildcard doesn't exist)
+    if ! grep -qxF "$LFS_WILDCARD_PATTERN" "$GITATTRIBUTES_FILE"; then
+      if ! grep -qxF "$LFS_SPECIFIC_PATTERN" "$GITATTRIBUTES_FILE"; then
+        echo "$LFS_SPECIFIC_PATTERN" >> "$GITATTRIBUTES_FILE"
+        echo "Added LFS tracking for '$ARCHIVE_FILE' in .gitattributes."
+
+        # Stage .gitattributes
+        git add "$GITATTRIBUTES_FILE" > /dev/null 2>&1 || true
+      fi
+    else
+      echo "Using existing wildcard LFS tracking pattern for git-vault archives."
+    fi
+
+    # Mark the file for LFS tracking
+    git lfs track "$ARCHIVE_FILE" > /dev/null 2>&1 || true
+  else
+    echo "Git LFS not available. Large archive will be stored directly in Git."
+    echo "For better performance with large files, consider installing Git LFS."
+  fi
+fi
+
 # --- Update Manifest ---
 # Add entry to the paths file
 echo "$PATH_HASH $PATH_TO_PROTECT" >> "$PATHS_FILE"
@@ -140,4 +205,7 @@ git add "$ARCHIVE_FILE" "$PATHS_FILE" "$GITIGNORE_FILE" > /dev/null 2>&1 || true
 # --- Success ---
 echo "Password saved in: $PW_FILE"
 echo "Archive stored in: $ARCHIVE_FILE"
+if [ "$ARCHIVE_SIZE" -ge "$LFS_THRESHOLD" ] && command -v git-lfs >/dev/null 2>&1; then
+  echo "Archive will be managed by Git LFS (${ARCHIVE_SIZE}MB, threshold: ${LFS_THRESHOLD}MB)"
+fi
 echo "Success: '$PATH_TO_PROTECT' is now managed by git-vault."
