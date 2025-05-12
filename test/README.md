@@ -53,6 +53,15 @@ bats test/errors.bats
 
 Tests create temporary repositories inside the `test/tmp/` directory, which is automatically cleaned up by the `teardown` functions in the tests.
 
+### Using `test/run-tests.sh` (Optional)
+
+A convenience script `test/run-tests.sh` is also provided. This script acts as a simple wrapper around the `bats` command.
+
+- If the `timeout` command is available on your system, `run-tests.sh` will execute the tests with a short, overall timeout (default 5 seconds) applied to the entire `bats` run. This can be useful for quickly stopping runaway test suites during local development.
+- If `timeout` is not available, it simply executes `bats` directly.
+
+**Note:** The primary timeout mechanism intended for preventing individual tests from hanging indefinitely is built into the test helper (`test/test_helper.bash`) and is automatically active when running tests via the standard `bats` command as described above. The `run-tests.sh` script provides an additional, coarser-grained timeout layer.
+
 ## Structure
 
 *   **`test/*.bats`:** Test files containing individual test cases (`@test "description" { ... }`).
