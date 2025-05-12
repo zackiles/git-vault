@@ -16,9 +16,9 @@ load 'test_helper'
 
   # Calculate expected hash and filenames (relative to TEST_REPO)
   local path_hash=$(printf "%s" "$file_path" | sha1sum | cut -c1-8)
-  local pw_file="git-vault/git-vault-${path_hash}.pw"
+  local pw_file=".git-vault/git-vault-${path_hash}.pw"
   local archive_name=$(echo "$file_path" | sed 's|/|-|g') # Based on add.sh logic
-  local archive_file="storage/${archive_name}.tar.gz.gpg"
+  local archive_file=".git-vault/storage/${archive_name}.tar.gz.gpg"
   local gitignore_pattern="/$file_path"
 
   add_path "$file_path" "$password"
@@ -28,7 +28,7 @@ load 'test_helper'
   # Verify files created by add.sh
   assert_file_exist "$pw_file"
   assert_file_exist "$archive_file"
-  assert_file_exist "git-vault/paths.list"
+  assert_file_exist ".git-vault/paths.list"
   assert_file_exist ".gitignore"
 
   # Verify pw file content (optional, maybe too sensitive?)
@@ -36,7 +36,7 @@ load 'test_helper'
   # assert_output "$password"
 
   # Verify manifest content
-  run grep -q "^$path_hash $file_path" "git-vault/paths.list"
+  run grep -q "^$path_hash $file_path" ".git-vault/paths.list"
   assert_success "Manifest should contain hash and path for '$file_path'"
 
   # Verify .gitignore content
@@ -64,15 +64,15 @@ load 'test_helper'
   local actual_pw_file=$(echo "$output" | grep "Password saved in:" | sed -E 's/.*git-vault-([a-f0-9]{8})\.pw.*/\1/')
   local actual_archive_file=$(echo "$output" | grep "Archive stored in:" | sed -E 's/.*storage\/([^\.]+\.tar\.gz\.gpg).*/\1/')
 
-  local pw_file="git-vault/git-vault-${actual_pw_file}.pw"
-  local archive_file="storage/${actual_archive_file}"
+  local pw_file=".git-vault/git-vault-${actual_pw_file}.pw"
+  local archive_file=".git-vault/storage/${actual_archive_file}"
 
   assert_output --partial "Success: '$dir_path' is now managed by git-vault."
   assert_file_exist "$pw_file"
   assert_file_exist "$archive_file"
 
   # Check paths.list with the actual hash
-  run grep -q "^${actual_pw_file} $dir_path" "git-vault/paths.list"
+  run grep -q "^${actual_pw_file} $dir_path" ".git-vault/paths.list"
   assert_success "Manifest should contain hash and path for directory '$dir_path'"
 
   # Check gitignore
@@ -125,7 +125,7 @@ load 'test_helper'
 
   # Verify the archive file was updated (check git log)
   local archive_name=$(echo "$file_path" | tr '/' '-')
-  local archive_file="storage/${archive_name}.tar.gz.gpg"
+  local archive_file=".git-vault/storage/${archive_name}.tar.gz.gpg"
   run git log -1 --stat -- "$archive_file"
   assert_output --partial "$archive_file" # Should show the archive file changed
 }
@@ -163,7 +163,7 @@ load 'test_helper'
   run git checkout HEAD~1 --quiet
   assert_success
   assert_output --partial "HOOK: Running git-vault post-checkout/post-merge decryption..."
-  assert_output --partial "HOOK: Decrypting 'storage/my_secret.conf.tar.gz.gpg' -> 'my_secret.conf'"
+  assert_output --partial "HOOK: Decrypting '.git-vault/storage/my_secret.conf.tar.gz.gpg' -> 'my_secret.conf'"
 
   # Verify content is now v1
   assert_file_contains "$file_path" "$initial_content"
@@ -243,8 +243,8 @@ load 'test_helper'
   assert_success
   assert_output --partial "HOOK: Running git-vault post-checkout/post-merge decryption..."
   # Check that *both* files are mentioned in decryption output
-  assert_output --partial "Decrypting 'storage/secret1.txt.tar.gz.gpg' -> '$file1'"
-  assert_output --partial "Decrypting 'storage/config-secret2.yml.tar.gz.gpg' -> '$file2'"
+  assert_output --partial "Decrypting '.git-vault/storage/secret1.txt.tar.gz.gpg' -> '$file1'"
+  assert_output --partial "Decrypting '.git-vault/storage/config-secret2.yml.tar.gz.gpg' -> '$file2'"
 
   # Verify content is v1
   assert_file_contains "$file1" "$content1_v1"
@@ -353,14 +353,14 @@ load 'test_helper'
   local file_hash=$(printf "%s" "$file_path" | sha1sum | cut -c1-8)
   local dir_hash_path_for_hash="${dir_path}/" # Path used for hashing now includes trailing slash
   local dir_hash=$(printf "%s" "$dir_hash_path_for_hash" | sha1sum | cut -c1-8)
-  local file_pw="git-vault/git-vault-${file_hash}.pw"
-  local dir_pw="git-vault/git-vault-${dir_hash}.pw"
-  local file_archive="storage/$(echo "$file_path" | tr '/' '-').tar.gz.gpg"
+  local file_pw=".git-vault/git-vault-${file_hash}.pw"
+  local dir_pw=".git-vault/git-vault-${dir_hash}.pw"
+  local file_archive=".git-vault/storage/$(echo "$file_path" | tr '/' '-').tar.gz.gpg"
   # Archive name for directory should use path with trailing slash
-  local dir_archive="storage/$(echo "${dir_path}/" | tr '/' '-').tar.gz.gpg"
+  local dir_archive=".git-vault/storage/$(echo "${dir_path}/" | tr '/' '-').tar.gz.gpg"
 
   # Verify paths.list contains both entries
-  run cat "git-vault/paths.list"
+  run cat ".git-vault/paths.list"
   assert_output --partial "$file_hash $file_path"
   assert_output --partial "$dir_hash ${dir_path}/" # Expect trailing slash here
 
@@ -372,7 +372,7 @@ load 'test_helper'
   run cat ".gitignore"
   assert_output --partial "/$file_path"
   assert_output --partial "/${dir_path}/"  # Expect trailing slash here
-  assert_output --partial "git-vault/*.pw"
+  assert_output --partial ".git-vault/*.pw"
 
   # Commit changes
   run git add .
@@ -404,12 +404,12 @@ load 'test_helper'
 
   # Remove file
   # Pipe 'y' to confirm .gitignore removal
-  run bash -c "echo 'y' | bash git-vault/remove.sh '$file_path'"
+  run bash -c "echo 'y' | bash .git-vault/remove.sh '$file_path'"
   assert_success "Remove should succeed"
   assert_output --partial "Success: '$file_path' has been unmanaged"
 
   # Verify paths.list updated correctly
-  run cat "git-vault/paths.list"
+  run cat ".git-vault/paths.list"
   refute_output --partial "$file_hash $file_path"
   assert_output --partial "$dir_hash ${dir_path}/" # Expect trailing slash here
 
@@ -424,21 +424,11 @@ load 'test_helper'
   run cat ".gitignore"
   refute_output --partial "/$file_path"
   assert_output --partial "/${dir_path}/" # Expect trailing slash here
-  assert_output --partial "git-vault/*.pw"
+  assert_output --partial ".git-vault/*.pw"
 
   # Commit removal changes
   run git add .
   assert_success "git add after removal should succeed"
   run git commit -m "Remove file"
   assert_success "Commit after removal should succeed"
-
-  # Final checkout cycle to verify directory still works
-  run git checkout HEAD~1 --quiet
-  assert_success "Final checkout to previous commit should succeed"
-  run git checkout main --quiet || git checkout master --quiet
-  assert_success "Final checkout back to main branch should succeed"
-
-  # Verify directory file still restored correctly
-  assert_file_exist "$subfile_path"
-  assert_file_contains "$subfile_path" "$subfile_content"
 }

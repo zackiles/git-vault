@@ -1,7 +1,7 @@
-git-vault/*.pw
+.git-vault/*.pw
 
 # Keep storage tracked
-!storage
+!.git-vault/storage
 
 # Repomix context file. Don't commit, generate locally when needed.
 codebase-summary.xml

@@ -16,7 +16,7 @@ load 'test_helper'
 
   # Calculate expected archive path
   local archive_name=$(echo "$tracked_path" | tr '/' '-')
-  local archive_path="storage/${archive_name}.tar.gz.gpg"
+  local archive_path=".git-vault/storage/${archive_name}.tar.gz.gpg"
 
   # Commit changes
   run git add .

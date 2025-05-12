@@ -109,10 +109,10 @@ install_git_vault() {
   assert_success "install.sh should succeed"
 
   # Verify basic installation results
-  assert_dir_exist "git-vault"
-  assert_dir_exist "storage"
+  assert_dir_exist ".git-vault"
+  assert_dir_exist ".git-vault/storage"
   assert_dir_exist ".githooks" # Check custom hooks path
-  assert_file_exist "git-vault/paths.list"
+  assert_file_exist ".git-vault/paths.list"
 
   # Check hooks in the CUSTOM locations (.githooks not .git/hooks)
   assert_file_exist ".githooks/pre-commit"
@@ -124,11 +124,11 @@ install_git_vault() {
 
   # Check .gitignore for the pw file pattern
   assert_file_exist ".gitignore"
-  run grep -q 'git-vault/\*\.pw' ".gitignore"
-  assert_success ".gitignore should contain git-vault/*.pw rule"
+  run grep -q '\.git-vault/\*\.pw' ".gitignore"
+  assert_success ".gitignore should contain .git-vault/*.pw rule"
 
   # Add all git-vault scripts to the repo so they don't show as untracked
-  git add .githooks git-vault storage
+  git add .githooks .git-vault
   git commit -m "Add git-vault infrastructure" --quiet
 
   # Cleanup our temp scripts
@@ -170,7 +170,7 @@ teardown() {
 add_path() {
   local path_to_add="$1"
   local password="$2"
-  local add_script="$TEST_REPO/git-vault/add.sh"
+  local add_script="$TEST_REPO/.git-vault/add.sh"
 
   # Create content if it doesn't exist
   if [ ! -e "$path_to_add" ]; then
@@ -184,7 +184,7 @@ add_path() {
   fi
 
   # Ensure storage directory exists with proper structure
-  mkdir -p "$TEST_REPO/storage"
+  mkdir -p "$TEST_REPO/.git-vault/storage"
 
   # Don't try to create directories based on archive_name, as it should be dash-separated
   # The actual add.sh script will correctly create parent directories as needed

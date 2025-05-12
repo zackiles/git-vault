@@ -92,8 +92,8 @@ fi
 
 cd "$TARGET_REPO_ROOT" || exit 1
 
-TARGET_GIT_VAULT_DIR="git-vault"
-STORAGE_DIR="storage"
+TARGET_GIT_VAULT_DIR=".git-vault"
+STORAGE_DIR="$TARGET_GIT_VAULT_DIR/storage"
 TARGET_MANIFEST="$TARGET_GIT_VAULT_DIR/paths.list"
 GIT_DIR=$(git -C "$TARGET_REPO_ROOT" rev-parse --git-dir) # Usually .git, but could be elsewhere
 
@@ -116,7 +116,7 @@ else
   echo "Using default hooks directory: $HOOKS_DIR"
 fi
 
-TARGET_GIT_VAULT_DIR_REL="git-vault" # Relative path to vault scripts from repo root
+TARGET_GIT_VAULT_DIR_REL=".git-vault" # Relative path to vault scripts from repo root
 
 # Define source script paths (relative to the location of install.sh)
 SOURCE_SCRIPT_DIR=$(dirname "$0") # Assumes install.sh location
@@ -158,15 +158,12 @@ if ! grep -qxF "$PW_IGNORE_PATTERN" "$GITIGNORE_FILE"; then
     echo "Adding '$PW_IGNORE_PATTERN' to $GITIGNORE_FILE"
     printf "\n# Git-Vault password files (DO NOT COMMIT)\n%s\n" "$PW_IGNORE_PATTERN" >> "$GITIGNORE_FILE"
 fi
-# Ensure storage/ is NOT ignored (remove explicit ignore, uncomment negation if present)
-# Note: This logic is simplified; assumes simple ignore rules. Might need enhancement for complex .gitignore files.
-if grep -qE "^\/?storage\/?$" "$GITIGNORE_FILE"; then
-    echo "WARN: 'storage/' seems to be ignored in $GITIGNORE_FILE. Git-Vault needs it tracked."
-    echo "      Please manually remove or negate the ignore rule (e.g., '!storage/')."
-elif grep -qE "^\!storage\/?$" "$GITIGNORE_FILE"; then
-     echo "'!storage/' negation found in $GITIGNORE_FILE (correct)."
-else
-     echo "'storage/' directory tracking status seems ok in $GITIGNORE_FILE."
+
+# Ensure storage/ directory is properly tracked
+STORAGE_DIR_REL="$TARGET_GIT_VAULT_DIR_REL/storage"  # Update to use new storage dir path
+if grep -q "^$STORAGE_DIR_REL" "$GITIGNORE_FILE"; then
+    echo "WARNING: '$STORAGE_DIR_REL/' is ignored in .gitignore but MUST be tracked."
+    echo "        Please modify your .gitignore to ensure '$STORAGE_DIR_REL/' is not ignored."
 fi
 
 # --- Git Hook Installation Function ---
@@ -252,6 +249,6 @@ echo "Usage:"
 echo "  Add a path:    $TARGET_GIT_VAULT_DIR_REL/add.sh <relative-path-to-file-or-dir>"
 echo "  Remove a path: $TARGET_GIT_VAULT_DIR_REL/remove.sh <relative-path-to-file-or-dir>"
 echo ""
-echo "Remember to commit changes to .gitignore and the storage/ directory."
+echo "Remember to commit changes to .gitignore and the $TARGET_GIT_VAULT_DIR_REL/ directory."
 
 exit 0

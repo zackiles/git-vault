@@ -16,9 +16,9 @@ command -v git >/dev/null 2>&1 || { echo >&2 "HOOK ERROR (git-vault encrypt): gi
 REPO=$(git rev-parse --show-toplevel) || { echo "HOOK ERROR (git-vault encrypt): Could not determine repository root."; exit 1; }
 cd "$REPO" || { echo "HOOK ERROR (git-vault encrypt): Could not change to repository root '$REPO'."; exit 1; }
 
-GIT_VAULT_DIR="git-vault"
+GIT_VAULT_DIR=".git-vault"
 MANIFEST="$GIT_VAULT_DIR/paths.list"
-STORAGE_DIR="storage"
+STORAGE_DIR="$GIT_VAULT_DIR/storage"
 
 # --- Check if Manifest Exists ---
 if [ ! -f "$MANIFEST" ]; then

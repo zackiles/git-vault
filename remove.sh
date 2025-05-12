@@ -26,8 +26,8 @@ PATH_IN=$1
 # --- Environment Setup ---
 REPO=$(git rev-parse --show-toplevel)
 cd "$REPO" || { echo "Error: Could not change directory to repo root '$REPO'."; exit 1; }
-GIT_VAULT_DIR="git-vault"
-STORAGE_DIR="storage"
+GIT_VAULT_DIR=".git-vault"
+STORAGE_DIR="$GIT_VAULT_DIR/storage"
 MANIFEST="$GIT_VAULT_DIR/paths.list"
 GITIGNORE_FILE=".gitignore"
 
@@ -120,8 +120,8 @@ if grep -qx "$IGNORE_PATTERN" "$GITIGNORE_FILE"; then
         fi
         if [ "$remaining_paths_count" -eq 0 ]; then
             echo "   Manifest is now empty. Removing generic password ignore pattern..."
-            PW_IGNORE_PATTERN="git-vault/*.pw"
-            # This is the comment typically added by install.sh - CORRECTED
+            PW_IGNORE_PATTERN="$GIT_VAULT_DIR/*.pw"
+            # This is the comment typically added by install.sh
             PW_COMMENT_LINE="# Git-Vault password files (DO NOT COMMIT)"
 
             # Robust alternative: Use grep -v to filter lines and overwrite

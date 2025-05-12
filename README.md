@@ -31,11 +31,11 @@ curl -sSL https://github.com/zackiles/git-vault/releases/latest/download/install
 
 This script performs the following setup:
 
-*   Copies the necessary scripts (`add.sh`, `remove.sh`, `encrypt.sh`, `decrypt.sh`) into a `./git-vault/` directory within your project.
-*   Creates a `./storage/` directory where encrypted files will eventually be stored.
-*   Creates an empty `./git-vault/paths.list` file to track vaulted items, if it doesn't already exist.
+*   Copies the necessary scripts (`add.sh`, `remove.sh`, `encrypt.sh`, `decrypt.sh`) into a `.git-vault/` directory within your project.
+*   Creates a `.git-vault/storage/` directory where encrypted files will eventually be stored.
+*   Creates an empty `.git-vault/paths.list` file to track vaulted items, if it doesn't already exist.
 *   Installs Git hooks (`pre-commit`, `post-checkout`, `post-merge`) into your repository's hooks directory (e.g., `.git/hooks/` or a custom path) to automate encryption and decryption.
-*   Updates your root `.gitignore` file to ensure password files (`./git-vault/*.pw`) are not committed.
+*   Updates your root `.gitignore` file to ensure password files (`.git-vault/*.pw`) are not committed.
 
 > [!IMPORTANT]
 > You need `gpg`, `tar`, `sha1sum` (or `shasum`), and `mktemp` installed and available in your PATH.
@@ -44,22 +44,22 @@ This script performs the following setup:
 
 **Add a file/directory to the vault:**
   ```bash
-  git-vault/add.sh <path/to/your/secret>
+  .git-vault/add.sh <path/to/your/secret>
   ```
-  Follow the prompts to set a password. This will create an encrypted archive in `storage/`, add the path to `git-vault/paths.list`, create a `.pw` file in `git-vault/`, and update `.gitignore`.
+  Follow the prompts to set a password. This will create an encrypted archive in `.git-vault/storage/`, add the path to `.git-vault/paths.list`, create a `.pw` file in `.git-vault/`, and update `.gitignore`.
 
 **Remove a file/directory from the vault:**
   ```bash
-  git-vault/remove.sh <path/to/your/secret>
+  .git-vault/remove.sh <path/to/your/secret>
   ```
   This verifies the password, removes the archive and manifest entry, renames the `.pw` file, and optionally cleans up `.gitignore`.
 
-**Commit Changes:** Remember to commit changes made by `add.sh` or `remove.sh` (like the encrypted archive in `storage/`, `git-vault/paths.list`, and `.gitignore`).
+**Commit Changes:** Remember to commit changes made by `add.sh` or `remove.sh` (like the encrypted archive in `.git-vault/storage/`, `.git-vault/paths.list`, and `.gitignore`).
 
 ## How It Works
 
-*   **Encryption (`pre-commit` hook):** Before you commit, `./git-vault/encrypt.sh` automatically re-encrypts any tracked plaintext files listed in `paths.list` into their corresponding archives in `storage/`. Only the encrypted archive is staged.
-*   **Decryption (`post-checkout`, `post-merge` hooks):** After checking out a branch or merging, `./git-vault/decrypt.sh` automatically decrypts the archives found in `storage/` back to their original plaintext locations, using the corresponding `.pw` files.
+*   **Encryption (`pre-commit` hook):** Before you commit, `.git-vault/encrypt.sh` automatically re-encrypts any tracked plaintext files listed in `paths.list` into their corresponding archives in `.git-vault/storage/`. Only the encrypted archive is staged.
+*   **Decryption (`post-checkout`, `post-merge` hooks):** After checking out a branch or merging, `.git-vault/decrypt.sh` automatically decrypts the archives found in `.git-vault/storage/` back to their original plaintext locations, using the corresponding `.pw` files.
 
 ## When To Use It
 
@@ -71,7 +71,7 @@ This script performs the following setup:
 
 ## Development and Testing
 
-This repository contains the **source code** for Git-Vault. The scripts reside at the root level here. When *installed* in your own repository using the command above, the scripts are placed inside the `git-vault/` subdirectory of *your* project.
+This repository contains the **source code** for Git-Vault. The scripts reside at the root level here. When *installed* in your own repository using the command above, the scripts are placed inside the `.git-vault/` subdirectory of *your* project.
 
 The project includes a comprehensive test suite using `bats-core`. Tests verify functionality for:
 
