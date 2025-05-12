@@ -1,0 +1,10 @@
+node_modules
+pnpm-lock.yaml
+test/test_helper
+test/tmp
+docs/
+.cursor/
+.ai/
+TODO.md
+LICENSE
+SECURITY
