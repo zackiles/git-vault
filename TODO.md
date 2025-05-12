@@ -16,3 +16,16 @@
 - The pattern for how to store the password or key IN 1Password should be idiomatic, intuitive, and seamless so that the user doesn't need to do anything and the password entries don't clutter or collide with their workspace.
 - `remove.sh` should remove the password from 1Password in a way similar to how file-based does, where it "marks" it removed instead of fully deleting it in case a user makes a mistake (we don't want them losing an unrecoverable decryption key)
 - Update all and tests/docs to reflect the new design. Ensure we mock 1Password's CLI interactions as best we can and doing so ONLY after doing deep research on their documentation and understanding of how it works cross-platform.
+
+## 3 ) Git LFS Integration for Large Archives
+
+- **Objective**: Automatically configure Git LFS for large encrypted archives to prevent repository bloat while maintaining versioning capabilities.
+- `install.sh` detects if Git LFS is available and sets up LFS tracking for the `storage/*.tar.gz.gpg` pattern.
+- Default threshold of 5MB for LFS tracking can be customized with `--min-lfs=<size>` flag during installation.
+- `add.sh` checks archive size after encryption and dynamically configures LFS tracking for individual files that exceed the threshold.
+- Make this seamless and transparent to the user - no manual LFS setup required.
+- Ensure proper error handling if Git LFS is not available or if LFS setup fails.
+- Add appropriate debug and status messaging when archives are detected as large and tracked via LFS.
+- Explicitly support and efficiently handle binary large objects (images, videos, datasets, etc.) through Git LFS integration.
+- Provide clear documentation that git-vault is fully compatible with binary large objects and any type of file without restrictions.
+- Update documentation and tests to verify LFS integration works correctly across platforms.

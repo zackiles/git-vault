@@ -1,0 +1,14 @@
+---
+description:
+globs: add.sh,install.sh,remove.sh,encrypt.sh,decrypt.sh
+alwaysApply: false
+---
+# Context on Git-Vault Scripts
+- The following scripts are what is installed in a users project for Git-Vault and provide all the functionality needed to manage their personal vault: [add.sh](mdc:add.sh), [install.sh](mdc:install.sh), [remove.sh](mdc:remove.sh), [encrypt.sh](mdc:encrypt.sh), and [decrypt.sh](mdc:decrypt.sh)
+- The scripts are installed by the user curling and running the [install.sh](mdc:install.sh) in memory from the latest Github Release.
+- The [install.sh](mdc:install.sh) script installs the scripts by pulling them from the same Github Release
+- The Github Action Workflow that creates the release is in [release.yml](mdc:.github/workflows/release.yml)
+- If you're unsure of the high-level goals of the project you may optionally read the user-facing documentation in [README.md](mdc:README.md) in the root of the project (NOT the same as `test/README.md`)
+- After adding functionality, or introducing breaking changes, ALWAYS update the user-facing docs [README.md](mdc:README.md) to ensure it still accurately describes Git-Vault functionality and usage.
+- Information on the Git-Vault test suite can be found in [test/README.md](mdc:test/README.md)
+- Information on the Git-Vault release workflow can be found in [RELEASING.md](mdc:RELEASING.md)

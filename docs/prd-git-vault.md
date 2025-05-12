@@ -11,10 +11,11 @@ Protect sensitive files inside a Git repo using lightweight, cross‑platform sh
 * Same user flow on macOS, Linux, Windows (git‑bash/WSL)
 * Hooks auto‑manage multiple protected paths
 * Passwords stored only in local `.pw` files, ignored by Git
+* Automatically configure Git LFS for large encrypted archives (>5MB by default)
 
 ## 3 Scope
 
-Encrypt whole folders or single files. Exclude binary‑large‑object stores. Do not manage key escrow.
+Encrypt whole folders or single files. Configure Git LFS for large archives to prevent repository bloat. Fully supports binary large objects through seamless Git LFS integration. Do not manage key escrow.
 
 ## 4 User‑Facing Scripts
 
@@ -58,6 +59,7 @@ done
 1. **Add resource →** password saved → plaintext path ignored → initial encrypt committed
 2. **Commit cycle →** `pre-commit` re‑encrypt updated plaintext → only `.gpg` enters history
 3. **Clone / checkout →** decrypted copy appears via `post-checkout` / `post-merge`
+4. **Large archives →** automatically tracked via Git LFS if size exceeds threshold (default 5MB)
 
 ## 8 Error Handling
 
@@ -70,6 +72,7 @@ done
 * AES‑256‑CTR via `gpg --symmetric`
 * `.pw` files chmod 600 on \*nix; `attrib +h` on Windows git‑bash
 * `.pw` filename uses `sha1sum <<< "$relpath"` first 8 chars to avoid leaking path
+* Large encrypted archives stored via Git LFS to maintain repository performance and efficiently handle binary large objects
 
 ## 10 Non‑Goals
 
@@ -82,9 +85,13 @@ done
 * Fresh repo + install ➜ hooks created, commit succeeds, encrypted blob visible in Git log
 * Checkout on second machine with same `.pw` files ➜ plaintext auto‑restored
 * Remove script ➜ archives gone, hooks updated, `.pw.removed` created
+* Large archives (>5MB) automatically tracked via Git LFS if available
+* Binary large objects like images, videos, and other large datasets properly handled via LFS
+* Install with `--min-lfs=10` ➜ only archives >10MB use Git LFS
 
 ## 12 Future Work
 
 * Optional age/openssl backend
 * CI helper to fetch passwords from secrets store
 * Bulk rotate passwords command
+* Enhanced Git LFS integration with progress reporting

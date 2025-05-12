@@ -1,0 +1,46 @@
+{
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimFinalNewlines": true,
+  "editor.detectIndentation": false,
+  "editor.indentSize": 2,
+  "editor.insertSpaces": true,
+  "[markdown]": {
+    "editor.formatOnSave": true
+  },
+  "search.exclude": {
+    "**/.cursor": true
+  },
+  "cSpell.words": [
+    "deno",
+    "typeof",
+    "zackiles",
+    "zacharyiles",
+    "asynciterable",
+    "webgpu",
+    "Iles",
+    "onclose",
+    "Zipkin",
+    "parentbased",
+    "tracestate",
+    "traceparent",
+    "MILLIS",
+    "msvc",
+    "denoland",
+    "dotenv",
+    "swapfile",
+    "hiberfil",
+    "dconf",
+    "keyrings",
+    "dbus",
+    "dockerenv",
+    "fseventsd",
+    "modelcontextprotocol",
+    "rwxr",
+    "pids",
+    "USERPROFILE",
+    "unvalidated",
+    "somevalue",
+    "testuser"
+  ],
+}

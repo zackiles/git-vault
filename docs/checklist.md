@@ -152,7 +152,32 @@ This checklist outlines the steps required to implement the Git-Vault tool based
 -   [x] Document dependency installation steps for major platforms (macOS, Debian/Ubuntu, Fedora, Arch, Windows/Git Bash). (Needs README update)
 -   [x] Perform end-to-end testing on all supported platforms. (Cannot verify)
 
-## VIII. Documentation Updates
+## VIII. Git LFS Integration for Large Files
+
+-   [ ] Implement Git LFS detection in `install.sh`:
+    -   [ ] Check if `git-lfs` command is available.
+    -   [ ] Initialize Git LFS if available using `git lfs install`.
+-   [ ] Add command-line parameter support for custom LFS threshold:
+    -   [ ] Parse and validate `--min-lfs=<size>` parameter (default 5MB).
+    -   [ ] Store threshold value in config file for use by other scripts.
+-   [ ] Setup LFS patterns in `.gitattributes`:
+    -   [ ] Create or update `.gitattributes` file.
+    -   [ ] Add LFS pattern for `storage/*.tar.gz.gpg`.
+    -   [ ] Stage `.gitattributes` changes.
+-   [ ] Enhance `add.sh` for LFS integration:
+    -   [ ] Check archive size after encryption.
+    -   [ ] Compare against threshold from config.
+    -   [ ] Configure LFS tracking for specific files if needed.
+-   [ ] Add informative messaging:
+    -   [ ] Report LFS status during installation.
+    -   [ ] Provide clear feedback when files are tracked with LFS.
+    -   [ ] Suggest LFS installation if not available but large files detected.
+-   [ ] Ensure efficient handling of binary large objects:
+    -   [ ] Test with various file types (images, videos, datasets).
+    -   [ ] Verify LFS integration works correctly with large binary files.
+    -   [ ] Document full compatibility with all file types including binaries.
+
+## IX. Documentation Updates
 
 -   [x] Update `README.md` with usage instructions.
 -   [ ] Ensure RFC (`docs/rfc-git-vault.md`) reflects the final implementation details. (Needs final review)
