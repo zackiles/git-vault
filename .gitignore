@@ -3,9 +3,11 @@ git-vault/*.pw
 # Keep storage tracked
 !storage
 
-tmp/
+# Repomix context file. Don't commit, generate locally when needed.
+codebase-summary.xml
 
 # Git-Vault test temporary files
+tmp/
 test/tmp/
 node_modules/
 

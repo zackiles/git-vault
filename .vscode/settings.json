@@ -8,6 +8,9 @@
   "[markdown]": {
     "editor.formatOnSave": true
   },
+  "files.associations": {
+    "repomix.config.json": "json5"
+  },
   "search.exclude": {
     "**/.cursor": true
   },
