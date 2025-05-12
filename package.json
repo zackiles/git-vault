@@ -1,0 +1,23 @@
+{
+  "name": "git-vault",
+  "version": "0.0.1",
+  "description": "Drop-dead simple solution for sharing sensitive things in open or inner-source.",
+  "main": "",
+  "scripts": {
+    "test": "bats test"
+  },
+  "keywords": [
+    "git",
+    "gpg",
+    "encrypt",
+    "secrets",
+    "hooks"
+  ],
+  "author": "Zachary Iles",
+  "license": "MIT",
+  "devDependencies": {
+    "bats-assert": "^2.0.0",
+    "bats-file": "git+https://github.com/bats-core/bats-file.git#v0.3.0",
+    "bats-support": "^0.3.0"
+  }
+}
