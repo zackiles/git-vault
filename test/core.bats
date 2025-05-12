@@ -70,11 +70,11 @@ load 'test_helper'
   assert_output --partial "Success: '$dir_path' is now managed by git-vault."
   assert_file_exist "$pw_file"
   assert_file_exist "$archive_file"
-  
+
   # Check paths.list with the actual hash
   run grep -q "^${actual_pw_file} $dir_path" "git-vault/paths.list"
   assert_success "Manifest should contain hash and path for directory '$dir_path'"
-  
+
   # Check gitignore
   local gitignore_pattern="/$dir_path" # Remove the trailing slash since dir_path already has one
   run grep -qxF "$gitignore_pattern" ".gitignore"
@@ -102,17 +102,17 @@ load 'test_helper'
   install_git_vault
   local file_path="my_secret.conf"
   add_path "$file_path" "password"
-  
+
   # Add all files including ignored ones
   run git add --force .
   assert_success "git add should succeed"
-  
-  run git commit -m "Add initial secret" 
+
+  run git commit -m "Add initial secret"
   assert_success "Initial commit should succeed"
 
   # Modify the secret file
   echo "new content" >> "$file_path"
-  
+
   # Make sure the file is staged (force add because it's in .gitignore)
   run git add --force "$file_path"
   assert_success "Adding ignored file should succeed with --force"
@@ -139,7 +139,7 @@ load 'test_helper'
   # Add and commit initial version
   echo "$initial_content" > "$file_path"
   add_path "$file_path" "password"
-  
+
   # Force add the ignored files
   run git add --force .
   assert_success "git add with force should succeed"
@@ -148,7 +148,7 @@ load 'test_helper'
 
   # Modify and commit second version
   echo "$updated_content" > "$file_path"
-  
+
   # Force add the modified file
   run git add --force "$file_path"
   assert_success "Adding modified file should succeed with --force"
@@ -218,7 +218,7 @@ load 'test_helper'
   echo "$content1_v1" > "$file1"; echo "$content2_v1" > "$file2"
   add_path "$file1" "pass1"
   add_path "$file2" "pass2"
-  
+
   # Force add the ignored files
   run git add --force .
   assert_success "git add with force should succeed"
@@ -227,7 +227,7 @@ load 'test_helper'
 
   # Commit v2
   echo "$content1_v2" > "$file1"; echo "$content2_v2" > "$file2"
-  
+
   # Force add the ignored files
   run git add --force "$file1" "$file2"
   assert_success "Adding modified files should succeed with --force"
@@ -249,4 +249,76 @@ load 'test_helper'
   # Verify content is v1
   assert_file_contains "$file1" "$content1_v1"
   assert_file_contains "$file2" "$content2_v1"
-} 
+}
+
+@test "[Nested] Complex directory structure is preserved after encrypt/decrypt cycle" {
+  install_git_vault
+  local dir_path="nested_secrets"
+  local password="complex_dir_password"
+
+  # Create a complex nested directory structure
+  mkdir -p "$dir_path/level1/level2/level3"
+  mkdir -p "$dir_path/branch1/branch2"
+  mkdir -p "$dir_path/empty_dir"  # Empty directory
+
+  # Create files at different levels
+  echo "root level content" > "$dir_path/root_file.txt"
+  echo "level 1 content" > "$dir_path/level1/level1_file.txt"
+  echo "level 2 content" > "$dir_path/level1/level2/level2_file.txt"
+  echo "level 3 content" > "$dir_path/level1/level2/level3/level3_file.txt"
+  echo "branch 1 content" > "$dir_path/branch1/branch1_file.txt"
+  echo "branch 2 content" > "$dir_path/branch1/branch2/branch2_file.txt"
+
+  # Add some special content
+  echo "file with spaces" > "$dir_path/file with spaces.txt"
+  echo "file.with.dots" > "$dir_path/file.with.dots.txt"
+
+  # Add the nested directory to git-vault
+  add_path "$dir_path" "$password"
+  assert_success
+  assert_output --partial "Success: '$dir_path/' is now managed by git-vault."
+
+  # Commit everything
+  run git add .
+  assert_success "git add should succeed"
+  run git commit -m "Add nested directory structure"
+  assert_success
+
+  # Create a list of all files/directories for verification
+  find "$dir_path" -type f -o -type d | sort > original_structure.txt
+
+  # Get content of all files for verification
+  find "$dir_path" -type f -exec sh -c 'echo "File: $1"; cat "$1"; echo ""' _ {} \; > original_content.txt
+
+  # Remove the entire directory (simulate checkout to a clean state)
+  rm -rf "$dir_path"
+
+  # Trigger decryption via post-checkout hook
+  run git checkout .
+  assert_success
+  assert_output --partial "HOOK: Running git-vault post-checkout/post-merge decryption..."
+  assert_output --partial "HOOK: Decrypting"
+
+  # Verify structure is preserved
+  find "$dir_path" -type f -o -type d | sort > restored_structure.txt
+  run diff original_structure.txt restored_structure.txt
+  assert_success "Directory structure should be identical after decryption"
+  assert_output ""  # Empty output means no differences
+
+  # Verify content is preserved
+  find "$dir_path" -type f -exec sh -c 'echo "File: $1"; cat "$1"; echo ""' _ {} \; > restored_content.txt
+  run diff original_content.txt restored_content.txt
+  assert_success "File content should be identical after decryption"
+  assert_output ""  # Empty output means no differences
+
+  # Verify a few specific files more explicitly
+  assert_file_exist "$dir_path/root_file.txt"
+  assert_file_exist "$dir_path/level1/level2/level3/level3_file.txt"
+  assert_file_exist "$dir_path/branch1/branch2/branch2_file.txt"
+  assert_file_exist "$dir_path/file with spaces.txt"
+
+  # Verify content of specific files
+  assert_file_contains "$dir_path/root_file.txt" "root level content"
+  assert_file_contains "$dir_path/level1/level2/level3/level3_file.txt" "level 3 content"
+  assert_file_contains "$dir_path/file with spaces.txt" "file with spaces"
+}

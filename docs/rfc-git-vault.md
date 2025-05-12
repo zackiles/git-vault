@@ -14,6 +14,7 @@ Many projects need to include sensitive folders in the repo for local use but mu
 - **Git hooks**: `pre-commit`, `post-checkout`, `post-merge`  
 - **Password files**: per-resource files named `git-vault-<hash>.pw` inside `git-vault/` (ignored by Git)  
 - **Encrypted archives**: stored under `storage/` as `<name>.tar.gz.gpg` (tracked by Git)
+- **Git LFS configuration**: automatically set up for large archives (>5MB by default), ensuring binary large objects are efficiently handled
 
 ## Detailed Implementation
 
@@ -48,7 +49,9 @@ This script is run within the target repository (e.g., via `curl | bash` or by c
 3.  Create an empty `git-vault/paths.list` if it doesn't exist (or copy the template).
 4.  Add `git-vault/*.pw` and potentially `git-vault/paths.list` (if secrets are derived from paths) to the root `.gitignore` if not already present. Ensure `storage/` is *not* ignored.
 5.  Install Git hooks (`pre-commit`, `post-checkout`, `post-merge`) that execute the scripts located inside the `git-vault/` directory (using relative paths like `../git-vault/encrypt.sh` from within `.git/hooks/`).
-6.  Print usage instructions referring to the scripts inside `git-vault/` (e.g., `git-vault/add.sh <path>`).
+6.  Check for Git LFS availability and set up LFS tracking for `storage/*.tar.gz.gpg` files if Git LFS is available.
+7.  Accept an optional `--min-lfs=<size>` parameter to customize the threshold (in MB) for LFS tracking.
+8.  Print usage instructions referring to the scripts inside `git-vault/` (e.g., `git-vault/add.sh <path>`).
 
 ### 3. `add.sh`
 
@@ -124,6 +127,25 @@ echo "$HASH $PATH_IN" >> "$MANIFEST"
 tar czf - -C "$REPO" "$PATH_IN" | gpg --batch --passphrase-file "$PWFILE" --cipher-algo AES256 > "$ARCHIVE"
 
 # Add archive to git (user should commit)
+# Check if Git LFS is configured and if the archive is large enough to use LFS
+if [ -f "$REPO/.git-vault/lfs-config" ]; then
+  MIN_LFS=$(cat "$REPO/.git-vault/lfs-config")
+  ARCHIVE_SIZE=$(du -m "$ARCHIVE" | cut -f1)
+  
+  if [ "$ARCHIVE_SIZE" -ge "$MIN_LFS" ] && command -v git-lfs >/dev/null 2>&1; then
+    echo "Large archive detected ($ARCHIVE_SIZE MB). Using Git LFS for tracking."
+    
+    # Ensure .gitattributes exists
+    touch "$REPO/.gitattributes"
+    
+    # Add LFS tracking for this specific file if not already tracked
+    if ! grep -q "^$ARCHIVE" "$REPO/.gitattributes"; then
+      echo "$ARCHIVE filter=lfs diff=lfs merge=lfs -text" >> "$REPO/.gitattributes"
+      git add "$REPO/.gitattributes"
+    fi
+  fi
+fi
+
 git add "$ARCHIVE"
 
 # Ensure plaintext path is ignored
@@ -397,7 +419,65 @@ echo "Hook installation complete."
 # ... rest of install.sh ...
 ```
 
-### 8. Cross-Platform Guarantees
+### 8. Git LFS Integration
+
+To properly manage large encrypted archives, including binary large objects like images, videos, and datasets, Git-Vault integrates with Git LFS when available:
+
+```sh
+#!/usr/bin/env sh
+# (Inside install.sh)
+# ... other install steps ...
+
+# Check for Git LFS and set up if available
+MIN_LFS=${MIN_LFS:-5} # Default 5MB threshold, can be overridden with --min-lfs parameter
+
+# Parse command line arguments for --min-lfs
+for arg in "$@"; do
+  case $arg in
+    --min-lfs=*)
+      MIN_LFS="${arg#*=}"
+      # Validate that it's a number
+      if ! [[ "$MIN_LFS" =~ ^[0-9]+$ ]]; then
+        echo "Error: --min-lfs value must be a positive integer. Using default of 5MB."
+        MIN_LFS=5
+      fi
+      shift
+      ;;
+  esac
+done
+
+# Store the LFS threshold for later use by add.sh
+echo "$MIN_LFS" > "$REPO_ROOT/git-vault/lfs-config"
+
+# Check if Git LFS is available
+if command -v git-lfs >/dev/null 2>&1; then
+  echo "Git LFS detected. Setting up LFS for large encrypted archives (>${MIN_LFS}MB)..."
+  
+  # Initialize Git LFS if not already done
+  if ! git lfs ls-files >/dev/null 2>&1; then
+    git lfs install
+  fi
+  
+  # Create or update .gitattributes
+  touch "$REPO_ROOT/.gitattributes"
+  
+  # Add pattern for tracking the storage directory (but only large files will be tracked)
+  if ! grep -q "storage/\*.tar.gz.gpg" "$REPO_ROOT/.gitattributes"; then
+    echo "# Git LFS tracking for large git-vault archives (added by git-vault)" >> "$REPO_ROOT/.gitattributes"
+    echo "storage/*.tar.gz.gpg filter=lfs diff=lfs merge=lfs -text" >> "$REPO_ROOT/.gitattributes"
+    git add "$REPO_ROOT/.gitattributes"
+    echo "Added Git LFS tracking pattern to .gitattributes"
+  fi
+  
+  echo "Git LFS setup complete. Archives larger than ${MIN_LFS}MB will be tracked via LFS."
+  echo "This ensures efficient handling of binary large objects like images, videos, and datasets."
+else
+  echo "Git LFS not found. Large encrypted archives will be tracked normally."
+  echo "Install Git LFS for better performance with large files and binary large objects."
+fi
+```
+
+### 9. Cross-Platform Guarantees
 
 *   Shebang `#!/usr/bin/env sh` targets POSIX compatibility.
 *   Dependency checks (`gpg`, `tar`, `sha1sum`/`shasum`) added.

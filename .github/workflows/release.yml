@@ -53,9 +53,8 @@ jobs:
         run: |
           COMMIT_MSG=$(git log -1 --pretty=format:%B ${{ github.sha }})
           # Properly handle multiline commit messages for GitHub Actions
-          echo "COMMIT_MSG<<EOF" >> $GITHUB_OUTPUT
-          echo "$COMMIT_MSG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          echo "$COMMIT_MSG" > release_notes.txt
+          echo "NOTES_FILE=release_notes.txt" >> $GITHUB_OUTPUT
 
       - name: Create release assets directory
         run: |
@@ -63,18 +62,10 @@ jobs:
           cp add.sh remove.sh encrypt.sh decrypt.sh install.sh README.md LICENSE release_assets/
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.get_tag.outputs.TAG }}
-          name: Release ${{ steps.get_tag.outputs.TAG }}
-          body: ${{ steps.get_commit_message.outputs.COMMIT_MSG }}
-          files: |
-            release_assets/add.sh
-            release_assets/remove.sh
-            release_assets/encrypt.sh
-            release_assets/decrypt.sh
-            release_assets/install.sh
-            release_assets/README.md
-            release_assets/LICENSE
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create ${{ steps.get_tag.outputs.TAG }} \
+            release_assets/* \
+            --title "Release ${{ steps.get_tag.outputs.TAG }}" \
+            --notes-file ${{ steps.get_commit_message.outputs.NOTES_FILE }}

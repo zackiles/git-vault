@@ -1,6 +1,54 @@
 #!/usr/bin/env sh
 set -euo pipefail
 
+# --- Constants ---
+# Allow configuration of release URL via environment variable (useful for testing)
+GITHUB_RELEASE_BASE_URL="${GIT_VAULT_RELEASE_URL:-https://github.com/zacharyiles/git-vault/releases/latest/download}"
+EMBEDDED_PATHS_LIST="# Git-Vault Managed Paths
+# Format: <file-path>#<hash>
+# Do not edit manually"
+
+# --- Helper Functions ---
+# Downloads a file from GitHub releases if not found locally
+download_or_use_local() {
+  local filename="$1"
+  local target_path="$2"
+  local source_dir="$3"
+
+  # First try to use local file (for local development/testing)
+  if [ -f "${source_dir}/${filename}" ]; then
+    echo "Using local copy of ${filename}"
+    cp "${source_dir}/${filename}" "${target_path}"
+    return 0
+  fi
+
+  # If local file not found, try to download from GitHub releases
+  echo "Local copy of ${filename} not found, downloading from GitHub releases..."
+  if command -v curl > /dev/null; then
+    if ! curl -sSL "${GITHUB_RELEASE_BASE_URL}/${filename}" -o "${target_path}"; then
+      echo "Error: Failed to download ${filename} using curl"
+      return 1
+    fi
+  elif command -v wget > /dev/null; then
+    if ! wget -q "${GITHUB_RELEASE_BASE_URL}/${filename}" -O "${target_path}"; then
+      echo "Error: Failed to download ${filename} using wget"
+      return 1
+    fi
+  else
+    echo "Error: Neither curl nor wget found. Cannot download ${filename}"
+    return 1
+  fi
+
+  # Verify download succeeded
+  if [ ! -s "${target_path}" ]; then
+    echo "Error: Downloaded file ${filename} is empty or failed to download"
+    return 1
+  fi
+
+  echo "Successfully downloaded ${filename}"
+  return 0
+}
+
 # --- Parse Arguments ---
 TARGET_DIR=""
 while [ "$#" -gt 0 ]; do
@@ -71,35 +119,32 @@ fi
 TARGET_GIT_VAULT_DIR_REL="git-vault" # Relative path to vault scripts from repo root
 
 # Define source script paths (relative to the location of install.sh)
-# Adjust these if install.sh is not in the same dir as other scripts in the source repo
 SOURCE_SCRIPT_DIR=$(dirname "$0") # Assumes install.sh location
-ADD_SH_SRC="${SOURCE_SCRIPT_DIR}/add.sh"
-REMOVE_SH_SRC="${SOURCE_SCRIPT_DIR}/remove.sh"
-ENCRYPT_SH_SRC="${SOURCE_SCRIPT_DIR}/encrypt.sh"
-DECRYPT_SH_SRC="${SOURCE_SCRIPT_DIR}/decrypt.sh"
-PATHS_LIST_SRC="${SOURCE_SCRIPT_DIR}/paths.list" # Source paths.list template
 
 # --- Ensure Directories and Files Exist ---
 echo "Ensuring required directories and files exist in target repo..."
 mkdir -p "$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR" "$TARGET_REPO_ROOT/$STORAGE_DIR" "$HOOKS_DIR"
-# Create target manifest if it doesn't exist (don't overwrite)
-[ ! -f "$TARGET_REPO_ROOT/$TARGET_MANIFEST" ] && touch "$TARGET_REPO_ROOT/$TARGET_MANIFEST"
 
-# --- Copy Scripts into Target Repo ---
-echo "Copying git-vault scripts into target '$TARGET_GIT_VAULT_DIR/'..."
-# Check if source files exist before copying
-[ ! -f "$ADD_SH_SRC" ] && { echo "Error: Source script '$ADD_SH_SRC' not found."; exit 1; }
-[ ! -f "$REMOVE_SH_SRC" ] && { echo "Error: Source script '$REMOVE_SH_SRC' not found."; exit 1; }
-[ ! -f "$ENCRYPT_SH_SRC" ] && { echo "Error: Source script '$ENCRYPT_SH_SRC' not found."; exit 1; }
-[ ! -f "$DECRYPT_SH_SRC" ] && { echo "Error: Source script '$DECRYPT_SH_SRC' not found."; exit 1; }
-[ ! -f "$PATHS_LIST_SRC" ] && { echo "Error: Source template '$PATHS_LIST_SRC' not found."; exit 1; }
+# --- Install Script Files ---
+echo "Installing git-vault scripts into target '$TARGET_GIT_VAULT_DIR/'..."
 
-cp "$ADD_SH_SRC" "$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/add.sh"
-cp "$REMOVE_SH_SRC" "$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/remove.sh"
-cp "$ENCRYPT_SH_SRC" "$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/encrypt.sh"
-cp "$DECRYPT_SH_SRC" "$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/decrypt.sh"
-# Copy paths.list only if the target doesn't exist, preserving existing user manifest
-[ ! -f "$TARGET_REPO_ROOT/$TARGET_MANIFEST" ] && cp "$PATHS_LIST_SRC" "$TARGET_REPO_ROOT/$TARGET_MANIFEST"
+# Create paths.list file from embedded content if it doesn't exist
+if [ ! -f "$TARGET_REPO_ROOT/$TARGET_MANIFEST" ]; then
+  echo "Creating paths.list manifest file from embedded template..."
+  echo "$EMBEDDED_PATHS_LIST" > "$TARGET_REPO_ROOT/$TARGET_MANIFEST"
+fi
+
+# Install script files, either from local copies or GitHub release
+SCRIPT_FILES="add.sh remove.sh encrypt.sh decrypt.sh"
+for script in $SCRIPT_FILES; do
+  # Try local file first, then download from GitHub if needed
+  if ! download_or_use_local "$script" "$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/$script" "$SOURCE_SCRIPT_DIR"; then
+    echo "Failed to install $script"
+    exit 1
+  fi
+  # Make sure the script is executable
+  chmod +x "$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/$script"
+done
 
 # --- Update .gitignore ---
 echo "Updating .gitignore..."
@@ -129,29 +174,29 @@ install_hook() {
   local hook_name="$1" # e.g., pre-commit
   local script_name="$2" # e.g., encrypt.sh
   local hook_path="$HOOKS_DIR/$hook_name"
-  
+
   # Calculate the relative path from the hooks directory to the git-vault scripts
   # This is more complex for custom hook paths
   local hooks_to_repo_root=""
-  
+
   # For default hooks in .git/hooks, it's typically "../.."
   # For custom hooks in .githooks, it's typically ""
   if [ "$HOOKS_DIR" = "$GIT_DIR/hooks" ]; then
     # Default hooks location (.git/hooks) - need to go up to repo root
-    hooks_to_repo_root="../.." 
+    hooks_to_repo_root="../.."
   elif [ "$HOOKS_DIR" = "$TARGET_REPO_ROOT/.githooks" ]; then
     # Custom hooks at repository level - already at repo root
-    hooks_to_repo_root="." 
+    hooks_to_repo_root="."
   else
     # For other custom locations, calculate relative path
     # This is a simplification and might need more robust path calculation
     hooks_to_repo_root="."
   fi
-  
+
   # Use absolute path for better reliability, especially in test environments
   local hook_script_path="$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR_REL/$script_name"
   local marker="# git-vault hook marker"
-  
+
   echo " - Processing $hook_name hook..."
   echo "   Hook script path will be: $hook_script_path"
 
