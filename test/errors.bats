@@ -242,3 +242,55 @@ EOF
     assert_success
   fi
 }
+
+@test "[Error Removal] Handles errors gracefully during removal" {
+  install_git_vault
+
+  # Create test file
+  local file_path="error_test.txt"
+  local correct_password="correct_pass"
+  local wrong_password="wrong_pass"
+
+  echo "test content" > "$file_path"
+
+  # Add file with correct password
+  add_path "$file_path" "$correct_password"
+  assert_success
+
+  # Commit the changes
+  run git add .
+  assert_success "git add should succeed"
+  run git commit -m "Add error test file"
+  assert_success "Commit should succeed"
+
+  # Get hash and paths for verification
+  local path_hash=$(printf "%s" "$file_path" | sha1sum | cut -c1-8)
+  local pw_file="git-vault/git-vault-${path_hash}.pw"
+  local archive_name=$(echo "$file_path" | tr '/' '-')
+  local archive_file="storage/${archive_name}.tar.gz.gpg"
+
+  # Verify prerequisites
+  assert_file_exist "$pw_file"
+  assert_file_exist "$archive_file"
+  run grep -q "^$path_hash $file_path" "git-vault/paths.list"
+  assert_success "Manifest should contain path before testing"
+
+  # Replace password file with wrong password
+  echo "$wrong_password" > "$pw_file"
+
+  # Try to remove with wrong password (now in the pw file)
+  run bash git-vault/remove.sh "$file_path"
+  assert_failure "Remove should fail with wrong password"
+  assert_output --partial "verification failed" || assert_output --partial "Password" || assert_output --partial "decrypt"
+
+  # Verify nothing was removed
+  assert_file_exist "$pw_file"
+  assert_file_exist "$archive_file"
+  run grep -q "^$path_hash $file_path" "git-vault/paths.list"
+  assert_success "Manifest should still contain path after failed removal"
+
+  # Try to remove non-existent file
+  run bash git-vault/remove.sh "non_existent.txt"
+  assert_failure "Remove should fail for non-existent file"
+  assert_output --partial "not" && assert_output --partial "managed"
+}

@@ -322,3 +322,123 @@ load 'test_helper'
   assert_file_contains "$dir_path/level1/level2/level3/level3_file.txt" "level 3 content"
   assert_file_contains "$dir_path/file with spaces.txt" "file with spaces"
 }
+
+@test "[MultiFile] Multi-item end-to-end workflow (add, encrypt, decrypt, remove)" {
+  install_git_vault
+
+  # Create test files and directory
+  local file_path="secret_file.txt"
+  local file_content="file data"
+  local dir_path="secret_dir"
+  local subfile_path="${dir_path}/sub_file.txt"
+  local subfile_content="subdir data"
+  local file_password="pass_file"
+  local dir_password="pass_dir"
+
+  echo "$file_content" > "$file_path"
+  mkdir -p "$dir_path"
+  echo "$subfile_content" > "$subfile_path"
+
+  # Add file with password
+  add_path "$file_path" "$file_password"
+  assert_success
+  assert_output --partial "Success: '$file_path' is now managed by git-vault."
+
+  # Add directory with password
+  add_path "$dir_path" "$dir_password"
+  assert_success
+  assert_output --partial "Success: '${dir_path}/' is now managed by git-vault."
+
+  # Calculate hashes for verification
+  local file_hash=$(printf "%s" "$file_path" | sha1sum | cut -c1-8)
+  local dir_hash_path_for_hash="${dir_path}/" # Path used for hashing now includes trailing slash
+  local dir_hash=$(printf "%s" "$dir_hash_path_for_hash" | sha1sum | cut -c1-8)
+  local file_pw="git-vault/git-vault-${file_hash}.pw"
+  local dir_pw="git-vault/git-vault-${dir_hash}.pw"
+  local file_archive="storage/$(echo "$file_path" | tr '/' '-').tar.gz.gpg"
+  # Archive name for directory should use path with trailing slash
+  local dir_archive="storage/$(echo "${dir_path}/" | tr '/' '-').tar.gz.gpg"
+
+  # Verify paths.list contains both entries
+  run cat "git-vault/paths.list"
+  assert_output --partial "$file_hash $file_path"
+  assert_output --partial "$dir_hash ${dir_path}/" # Expect trailing slash here
+
+  # Verify password files exist
+  assert_file_exist "$file_pw"
+  assert_file_exist "$dir_pw"
+
+  # Verify .gitignore patterns
+  run cat ".gitignore"
+  assert_output --partial "/$file_path"
+  assert_output --partial "/${dir_path}/"  # Expect trailing slash here
+  assert_output --partial "git-vault/*.pw"
+
+  # Commit changes
+  run git add .
+  assert_success "git add should succeed"
+  run git commit -m "Add file and dir"
+  assert_success "Commit should succeed"
+
+  # Verify archives exist
+  assert_file_exist "$file_archive"
+  assert_file_exist "$dir_archive"
+
+  # Verify original files still exist after commit
+  assert_file_exist "$file_path"
+  assert_file_exist "$subfile_path"
+  assert_file_contains "$file_path" "$file_content"
+  assert_file_contains "$subfile_path" "$subfile_content"
+
+  # Checkout cycle test
+  run git checkout HEAD~1 --quiet
+  assert_success "Checkout to previous commit should succeed"
+  run git checkout main --quiet || git checkout master --quiet
+  assert_success "Checkout back to main branch should succeed"
+
+  # Verify files restored correctly after checkout cycle
+  assert_file_exist "$file_path"
+  assert_file_exist "$subfile_path"
+  assert_file_contains "$file_path" "$file_content"
+  assert_file_contains "$subfile_path" "$subfile_content"
+
+  # Remove file
+  # Pipe 'y' to confirm .gitignore removal
+  run bash -c "echo 'y' | bash git-vault/remove.sh '$file_path'"
+  assert_success "Remove should succeed"
+  assert_output --partial "Success: '$file_path' has been unmanaged"
+
+  # Verify paths.list updated correctly
+  run cat "git-vault/paths.list"
+  refute_output --partial "$file_hash $file_path"
+  assert_output --partial "$dir_hash ${dir_path}/" # Expect trailing slash here
+
+  # Verify file password file removed/renamed
+  assert_file_not_exist "$file_pw"
+  assert_file_exist "${file_pw%.pw}.removed"
+
+  # Verify file archive removed
+  assert_file_not_exist "$file_archive"
+
+  # Verify .gitignore updated
+  run cat ".gitignore"
+  refute_output --partial "/$file_path"
+  assert_output --partial "/${dir_path}/" # Expect trailing slash here
+  assert_output --partial "git-vault/*.pw"
+
+  # Commit removal changes
+  run git add .
+  assert_success "git add after removal should succeed"
+  run git commit -m "Remove file"
+  assert_success "Commit after removal should succeed"
+
+  # Final checkout cycle to verify directory still works
+  run git checkout HEAD~1 --quiet
+  assert_success "Final checkout to previous commit should succeed"
+  run git checkout main --quiet || git checkout master --quiet
+  assert_success "Final checkout back to main branch should succeed"
+
+  # Verify directory file still restored correctly
+  assert_file_exist "$subfile_path"
+  assert_file_contains "$subfile_path" "$subfile_content"
+}

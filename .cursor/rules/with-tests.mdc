@@ -10,3 +10,5 @@ alwaysApply: false
 - After editing or creating tests, ensure [test/README.md](mdc:test/README.md) is still accurate
 - If vendored files are needed they can be stored in `test/test_helper` which already includes some vendored bats libraries
 - If you're unsure of the high-level goals of the project you may optionally read the user-facing documentation in [README.md](mdc:README.md) in the root of the project (NOT the same as `test/README.md`)
+- Simple tests, strong coverage. Don't over-engineer tests. Don't make inflexible tests with strict assertions like needing exact error messages to confirm. Test core functionality that impacts the user experience in the simplest way possible.
+- **IMPORTANT**: Tests run locally and in Github Action workflows. Ensure tests are kept simple enough to work in the Github workflow configured in the file [release.yml](mdc:.github/release.yml)

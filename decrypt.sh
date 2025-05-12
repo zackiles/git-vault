@@ -35,9 +35,15 @@ HAS_DECRYPTED_ANYTHING=0 # Track if we actually performed any decryption
 
 # Use IFS='' and -r to handle paths with spaces or special characters correctly
 while IFS=' ' read -r HASH PATH_IN REST || [ -n "$HASH" ]; do # Process even if last line has no newline
-  # Skip empty lines or lines not matching the expected format (hash path)
-  if [ -z "$HASH" ] || [ -z "$PATH_IN" ]; then
-    continue
+  # Skip comment lines (starting with #) and empty lines
+  case "$HASH" in
+    '#'*|'') continue ;;
+  esac
+
+  # Skip lines not matching the expected format (hash path) - simple check
+  if [ -z "$HASH" ] || [ -z "$PATH_IN" ] || [ "${#HASH}" -ne 8 ]; then
+      echo "HOOK INFO (git-vault decrypt): Skipping malformed line in $MANIFEST: $HASH $PATH_IN $REST" >&2
+      continue
   fi
 
   PWFILE="$GIT_VAULT_DIR/git-vault-$HASH.pw"
