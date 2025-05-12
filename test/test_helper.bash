@@ -13,7 +13,7 @@ setup_test_repo() {
   # Create a temporary directory for this test
   local test_repo_path
   test_repo_path=$(mktemp -d "$TMP_DIR/git-vault-test.XXXXXX")
-  
+
   # Store the path in a global variable for the test to use and for teardown
   TEST_REPO="$test_repo_path"
   export TEST_REPO # Make it available to subshells run by 'run'
@@ -21,20 +21,20 @@ setup_test_repo() {
   # Initialize a proper git repository in the temp directory
   cd "$TEST_REPO" || return 1
   git init --initial-branch=main --quiet
-  
+
   # Configure git user for commits (required by Git)
   git config user.email "test@example.com"
   git config user.name "Git Vault Test"
-  
+
   # Create a basic .gitignore file
   echo "# Git test repository" > ".gitignore"
   echo "*.log" >> ".gitignore"
   echo "*.tmp" >> ".gitignore"
-  
+
   # Make an initial commit to establish the repo
   git add .gitignore
   git commit -m "Initial commit with .gitignore" --quiet
-  
+
   # Set up custom hooks directory for better isolation
   # IMPORTANT: Use .githooks instead of .git/hooks to avoid modifying the real Git hooks
   git config core.hooksPath ".githooks" # Use a local dir instead of .git/hooks
@@ -56,7 +56,9 @@ install_git_vault() {
   cp "$PROJECT_ROOT/encrypt.sh" "$TEST_REPO/temp_scripts/"
   cp "$PROJECT_ROOT/decrypt.sh" "$TEST_REPO/temp_scripts/"
   cp "$PROJECT_ROOT/install.sh" "$TEST_REPO/temp_scripts/"
-  cp "$PROJECT_ROOT/paths.list" "$TEST_REPO/temp_scripts/"
+
+  # Create an empty paths.list instead of copying it (since it's now embedded in install.sh)
+  touch "$TEST_REPO/temp_scripts/paths.list"
 
   # Run the install script with the --target-dir flag pointing to our test repository
   # This ensures we never modify the main project's files or hooks
@@ -69,7 +71,7 @@ install_git_vault() {
   assert_dir_exist "storage"
   assert_dir_exist ".githooks" # Check custom hooks path
   assert_file_exist "git-vault/paths.list"
-  
+
   # Check hooks in the CUSTOM locations (.githooks not .git/hooks)
   assert_file_exist ".githooks/pre-commit"
   assert_file_exist ".githooks/post-checkout"
@@ -82,11 +84,11 @@ install_git_vault() {
   assert_file_exist ".gitignore"
   run grep -q 'git-vault/\*\.pw' ".gitignore"
   assert_success ".gitignore should contain git-vault/*.pw rule"
-  
+
   # Add all git-vault scripts to the repo so they don't show as untracked
   git add .githooks git-vault storage
   git commit -m "Add git-vault infrastructure" --quiet
-  
+
   # Cleanup our temp scripts
   rm -rf "$TEST_REPO/temp_scripts"
 }
@@ -138,13 +140,13 @@ add_path() {
 
   # Ensure storage directory exists with proper structure
   mkdir -p "$TEST_REPO/storage"
-  
+
   # Don't try to create directories based on archive_name, as it should be dash-separated
   # The actual add.sh script will correctly create parent directories as needed
-  
+
   # Run add.sh, piping the password twice
   # Use a subshell or process substitution to handle stdin
   echo "Running add.sh for $path_to_add"
   run bash -c "printf '%s\\n%s\\n' '$password' '$password' | bash '$add_script' '$path_to_add'"
   assert_success "add.sh should succeed for '$path_to_add'"
-} 
+}
