@@ -95,29 +95,40 @@ rm -f "$ARCHIVE"
 
 # 4. Offer to remove from .gitignore
 echo " - Checking '$GITIGNORE_FILE' for ignore rule..."
-# Construct the expected ignore pattern (same logic as add.sh)
-IGNORE_PATTERN="$PATH_IN"
-if [ -d "$PATH_IN" ]; then
-    IGNORE_PATTERN="/$PATH_IN/" # Directory pattern
-else
-    IGNORE_PATTERN="/$PATH_IN" # File pattern
-fi
+
+# PATH_IN should already have a trailing slash if it's a directory, based on how it was added.
+# We form the pattern exactly as add.sh would:
+IGNORE_PATTERN="/$PATH_IN"
 
 # Check if the ignore pattern exists in .gitignore
 # Use grep -x for exact line match
 if grep -qx "$IGNORE_PATTERN" "$GITIGNORE_FILE"; then
     printf "Remove '%s' from %s? [y/N]: " "$IGNORE_PATTERN" "$GITIGNORE_FILE"
-    read -r response
+    read -r response || true # Add || true to handle potential read errors
     echo # Add newline after read
     if [ "$response" = "y" ] || [ "$response" = "Y" ]; then
         echo "   Removing '$IGNORE_PATTERN' from $GITIGNORE_FILE..."
         # Use sed to delete the line containing the exact pattern
-        # Note: Assumes pattern is on its own line. May need refinement for complex .gitignore
         sed -i.bak "\|^$IGNORE_PATTERN$|d" "$GITIGNORE_FILE"
-        # Also try removing the comment line added by add.sh if present
-        COMMENT_PATTERN="# Added by git-vault for: $PATH_IN"
-        sed -i.bak "\|^${COMMENT_PATTERN}$|d" "$GITIGNORE_FILE"
-        rm -f "$GITIGNORE_FILE.bak" # Clean up backups
+        rm -f "$GITIGNORE_FILE.bak" # Clean up backup
+
+        # Check if manifest is now empty and remove generic patterns if so
+        if [ -r "$MANIFEST" ]; then
+            remaining_paths_count=$(grep -cE '^[a-f0-9]{8} ' "$MANIFEST" || true)
+        else
+            remaining_paths_count=0
+        fi
+        if [ "$remaining_paths_count" -eq 0 ]; then
+            echo "   Manifest is now empty. Removing generic password ignore pattern..."
+            PW_IGNORE_PATTERN="git-vault/*.pw"
+            # This is the comment typically added by install.sh - CORRECTED
+            PW_COMMENT_LINE="# Git-Vault password files (DO NOT COMMIT)"
+
+            # Robust alternative: Use grep -v to filter lines and overwrite
+            temp_gitignore=$(mktemp)
+            (grep -vxF "$PW_COMMENT_LINE" "$GITIGNORE_FILE" | grep -vxF "$PW_IGNORE_PATTERN") > "$temp_gitignore"
+            mv "$temp_gitignore" "$GITIGNORE_FILE"
+        fi
 
         echo "   Staging updated $GITIGNORE_FILE..."
         git add "$GITIGNORE_FILE"
