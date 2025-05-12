@@ -36,6 +36,10 @@ jobs:
   release:
     needs: test
     runs-on: ubuntu-latest
+    # Add explicit permissions for releases
+    permissions:
+      contents: write
+      discussions: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
