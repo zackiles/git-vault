@@ -18,41 +18,41 @@ There's never been a quick, simple, consistent, and git-native way to secure fil
 **Everything else?**:
 👎 Native git hooks, cross-platform, 3rd party dependencies, complicated, sketchy code...
 
-> [!NOTE]
+> [!TIP]
 > Checkout some examples of [When To Use It](#when-to-use-it).
-
 
 ## Installation
 
-Run the following command from the root of your Git repository:
+Install Git-Vault as needed per-project by running the following command from the root of your Git repository:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/zackiles/git-vault/main/install.sh | bash
+curl -sSL https://github.com/zackiles/git-vault/releases/latest/download/install.sh | bash
 ```
 
-This will:
+This script performs the following setup:
 
-*   Create `git-vault/` and `storage/` directories in your project root.
-*   Copy the necessary scripts (`add.sh`, `remove.sh`, `encrypt.sh`, `decrypt.sh`) into `./git-vault/`.
-*   Create `./git-vault/paths.list` to track vaulted files.
-*   Install hooks (`pre-commit`, `post-checkout`, `post-merge`) into `.git/hooks/`.
-*   Update your root `.gitignore` to ignore `./git-vault/*.pw` password files.
+*   Copies the necessary scripts (`add.sh`, `remove.sh`, `encrypt.sh`, `decrypt.sh`) into a `./git-vault/` directory within your project.
+*   Creates a `./storage/` directory where encrypted files will eventually be stored.
+*   Creates an empty `./git-vault/paths.list` file to track vaulted items, if it doesn't already exist.
+*   Installs Git hooks (`pre-commit`, `post-checkout`, `post-merge`) into your repository's hooks directory (e.g., `.git/hooks/` or a custom path) to automate encryption and decryption.
+*   Updates your root `.gitignore` file to ensure password files (`./git-vault/*.pw`) are not committed.
 
-**Important:** You need `gpg`, `tar`, `sha1sum` (or `shasum`), and `mktemp` installed and available in your PATH.
+> [!IMPORTANT]
+> You need `gpg`, `tar`, `sha1sum` (or `shasum`), and `mktemp` installed and available in your PATH.
 
 ## Usage
 
-*   **Add a file/directory to the vault:**
-    ```bash
-    git-vault/add.sh <path/to/your/secret>
-    ```
-    Follow the prompts to set a password. This will create an encrypted archive in `storage/`, add the path to `git-vault/paths.list`, create a `.pw` file in `git-vault/`, and update `.gitignore`.
+**Add a file/directory to the vault:**
+  ```bash
+  git-vault/add.sh <path/to/your/secret>
+  ```
+  Follow the prompts to set a password. This will create an encrypted archive in `storage/`, add the path to `git-vault/paths.list`, create a `.pw` file in `git-vault/`, and update `.gitignore`.
 
-*   **Remove a file/directory from the vault:**
-    ```bash
-    git-vault/remove.sh <path/to/your/secret>
-    ```
-    This verifies the password, removes the archive and manifest entry, renames the `.pw` file, and optionally cleans up `.gitignore`.
+**Remove a file/directory from the vault:**
+  ```bash
+  git-vault/remove.sh <path/to/your/secret>
+  ```
+  This verifies the password, removes the archive and manifest entry, renames the `.pw` file, and optionally cleans up `.gitignore`.
 
 **Commit Changes:** Remember to commit changes made by `add.sh` or `remove.sh` (like the encrypted archive in `storage/`, `git-vault/paths.list`, and `.gitignore`).
 
@@ -75,13 +75,14 @@ This repository contains the **source code** for Git-Vault. The scripts reside a
 
 The project includes a comprehensive test suite using `bats-core`. Tests verify functionality for:
 
-- Core operations (add, remove, encryption, decryption)
-- Error handling and edge cases
-- Git hook integration
+* Core operations (add, remove, encryption, decryption)
+* Error handling and edge cases
+* Git hook integration
 
-For details on running or modifying tests, see the [test/README.md](test/README.md) file.
+> [!TIP]
+> For details on running or modifying tests, see the [test/README.md](test/README.md) file.
 
-## Development Environment Setup
+### Environment Setup
 
 To contribute to Git-Vault development, you need to set up your local environment. This ensures you can run the tests and work with the scripts.
 
