@@ -40,6 +40,7 @@ curl -sSL https://github.com/zackiles/git-vault/releases/latest/download/install
 
 This script performs the following setup:
 
+*   Checks for and offers to install any missing dependencies (`gpg`, `tar`, `sha1sum`/`shasum`, `mktemp`, `sed`)
 *   Copies the necessary scripts (`add.sh`, `remove.sh`, `encrypt.sh`, `decrypt.sh`) into a `.git-vault/` directory within your project.
 *   Creates a `.git-vault/storage/` directory where encrypted files will eventually be stored.
 *   Creates an empty `.git-vault/paths.list` file to track vaulted items, if it doesn't already exist.
@@ -47,8 +48,8 @@ This script performs the following setup:
 *   Updates your root `.gitignore` file to ensure password files (`.git-vault/*.pw`) are not committed.
 *   Configures Git LFS for large archives if Git LFS is available (see [Git LFS Integration](#git-lfs-integration) below).
 
-> [!IMPORTANT]
-> You need `gpg`, `tar`, `sha1sum` (or `shasum`), and `mktemp` installed and available in your PATH.
+> [!NOTE]
+> Git-Vault has automatic dependency detection and installation. If any required dependencies are missing, the script will offer to install them automatically for you based on your operating system. Supported platforms include Linux (Debian/Ubuntu, Fedora, Arch), macOS, and Windows (Git Bash/MinGW).
 
 ## Usage
 
@@ -116,6 +117,7 @@ The project includes a comprehensive test suite using `bats-core`. Tests verify 
 * Error handling and edge cases
 * Git hook integration
 * Git LFS integration for large archives
+* Automatic dependency detection and installation
 
 > [!TIP]
 > For details on running or modifying tests, see the [test/README.md](test/README.md) file.

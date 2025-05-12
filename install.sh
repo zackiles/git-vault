@@ -10,6 +10,179 @@ EMBEDDED_PATHS_LIST="# Git-Vault Managed Paths
 # Default LFS threshold in MB
 DEFAULT_LFS_THRESHOLD=5
 
+# --- Dependency Management ---
+# List of required dependencies and their package names for different platforms
+REQUIRED_DEPS="gpg tar mktemp"
+SHASUM_DEPS="sha1sum shasum" # At least one must be present
+SED_DEPS="sed" # Additional utilities
+
+# Package names for different platforms
+LINUX_APT_PACKAGES="gnupg tar coreutils sed"
+LINUX_DNF_PACKAGES="gnupg tar coreutils sed"
+LINUX_PACMAN_PACKAGES="gnupg tar coreutils sed"
+MACOS_BREW_PACKAGES="gnupg coreutils"
+
+# Function to check if a command exists
+check_dependency() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+# Function to check if any of the alternative commands exist
+check_alternative_deps() {
+  local found=false
+  for cmd in $1; do
+    if check_dependency "$cmd"; then
+      found=true
+      break
+    fi
+  done
+  [ "$found" = true ]
+}
+
+# Function to detect the platform and package manager
+detect_platform() {
+  local kernel
+  kernel=$(uname -s)
+  case "$kernel" in
+    Linux)
+      if [ -f /etc/debian_version ] || [ -f /etc/ubuntu_version ] || command -v apt-get >/dev/null 2>&1; then
+        echo "linux-apt"
+      elif [ -f /etc/fedora-release ] || command -v dnf >/dev/null 2>&1; then
+        echo "linux-dnf"
+      elif [ -f /etc/arch-release ] || command -v pacman >/dev/null 2>&1; then
+        echo "linux-pacman"
+      else
+        echo "linux-unknown"
+      fi
+      ;;
+    Darwin)
+      echo "macos"
+      ;;
+    CYGWIN*|MINGW*|MSYS*)
+      echo "windows"
+      ;;
+    *)
+      echo "unknown"
+      ;;
+  esac
+}
+
+# Function to check all dependencies and return list of missing ones
+check_all_dependencies() {
+  local missing_deps=""
+
+  # Check required dependencies
+  for dep in $REQUIRED_DEPS; do
+    if ! check_dependency "$dep"; then
+      missing_deps="$missing_deps $dep"
+    fi
+  done
+
+  # Check for sha1sum or shasum
+  if ! check_alternative_deps "$SHASUM_DEPS"; then
+    missing_deps="$missing_deps sha1sum/shasum"
+  fi
+
+  # Check additional utilities
+  for dep in $SED_DEPS; do
+    if ! check_dependency "$dep"; then
+      missing_deps="$missing_deps $dep"
+    fi
+  done
+
+  echo "$missing_deps"
+}
+
+# Function to install dependencies based on platform
+install_dependencies() {
+  local platform="$1"
+  local missing_deps="$2"
+  local exit_code=0
+
+  case "$platform" in
+    linux-apt)
+      echo "Installing dependencies using apt..."
+      if ! sudo apt-get update; then
+        echo "Error: Failed to update package lists" >&2
+        return 1
+      fi
+      if ! sudo apt-get install -y $LINUX_APT_PACKAGES; then
+        echo "Error: Failed to install packages" >&2
+        return 1
+      fi
+      ;;
+    linux-dnf)
+      echo "Installing dependencies using dnf..."
+      if ! sudo dnf install -y $LINUX_DNF_PACKAGES; then
+        echo "Error: Failed to install packages" >&2
+        return 1
+      fi
+      ;;
+    linux-pacman)
+      echo "Installing dependencies using pacman..."
+      if ! sudo pacman -Sy --noconfirm $LINUX_PACMAN_PACKAGES; then
+        echo "Error: Failed to install packages" >&2
+        return 1
+      fi
+      ;;
+    macos)
+      if ! command -v brew >/dev/null 2>&1; then
+        echo "Homebrew is required but not installed. Please install Homebrew first:"
+        echo "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+        return 1
+      fi
+      echo "Installing dependencies using Homebrew..."
+      if ! brew install $MACOS_BREW_PACKAGES; then
+        echo "Error: Failed to install packages" >&2
+        return 1
+      fi
+      ;;
+    windows)
+      echo "Git Bash/MinGW environment detected."
+      echo "Most dependencies should be included with Git for Windows."
+      echo "If any are missing, please install Git for Windows with all components:"
+      echo "  https://git-scm.com/download/win"
+      return 0
+      ;;
+    *)
+      echo "Error: Unsupported platform for automatic dependency installation" >&2
+      return 1
+      ;;
+  esac
+
+  # Re-verify that all dependencies are now installed
+  echo "Verifying installation of dependencies..."
+  local still_missing=""
+
+  # Check required dependencies again
+  for dep in $REQUIRED_DEPS; do
+    if ! check_dependency "$dep"; then
+      still_missing="$still_missing $dep"
+    fi
+  done
+
+  # Check for sha1sum or shasum again
+  if ! check_alternative_deps "$SHASUM_DEPS"; then
+    still_missing="$still_missing sha1sum/shasum"
+  fi
+
+  # Check additional utilities again
+  for dep in $SED_DEPS; do
+    if ! check_dependency "$dep"; then
+      still_missing="$still_missing $dep"
+    fi
+  done
+
+  if [ -n "$still_missing" ]; then
+    echo "Error: Some dependencies are still missing after installation:$still_missing" >&2
+    echo "Please install them manually" >&2
+    return 1
+  fi
+
+  echo "All dependencies successfully installed!"
+  return $exit_code
+}
+
 # --- Helper Functions ---
 # Downloads a file from GitHub releases if not found locally
 download_or_use_local() {
@@ -88,7 +261,37 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-# --- Script Setup ---
+# --- Main Script ---
+# Check for dependencies
+platform=$(detect_platform)
+missing_deps=$(check_all_dependencies)
+
+if [ -n "$missing_deps" ]; then
+  echo "Missing required dependencies:$missing_deps"
+  echo
+
+  if [ "$platform" = "unknown" ] || [ "$platform" = "linux-unknown" ]; then
+    echo "Error: Your platform does not support automatic dependency installation."
+    echo "Please install the following dependencies manually:$missing_deps"
+    exit 1
+  fi
+
+  read -p "Would you like to install the missing dependencies? [y/N] " -n 1 -r
+  echo
+  if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if ! install_dependencies "$platform" "$missing_deps"; then
+      echo "Error: Failed to install dependencies. Please install them manually:$missing_deps"
+      exit 1
+    fi
+    echo "Dependencies installed successfully."
+  else
+    echo "Dependencies are required for git-vault to function properly."
+    echo "Please install them manually:$missing_deps"
+    exit 1
+  fi
+fi
+
+# --- Main Installation Logic ---
 # Use specified target directory or default to current git repo root
 if [ -z "$TARGET_DIR" ]; then
   TARGET_REPO_ROOT=$(git rev-parse --show-toplevel) || exit 1
