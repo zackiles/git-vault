@@ -30,6 +30,7 @@ This directory contains the automated tests for the Git-Vault tool, written usin
     *   `sha1sum` (usually part of `coreutils`) or `shasum` (often available on macOS)
     *   `mktemp` (usually part of `coreutils`)
     *   `sed`
+    *   `git-lfs` (optional, for LFS tests)
 
 ## Running Tests
 
@@ -49,6 +50,8 @@ bats test/core.bats
 bats test/remove.bats
 # or
 bats test/errors.bats
+# or
+bats test/lfs.bats
 ```
 
 Tests create temporary repositories inside the `test/tmp/` directory, which is automatically cleaned up by the `teardown` functions in the tests.
@@ -57,7 +60,7 @@ Tests create temporary repositories inside the `test/tmp/` directory, which is a
 
 A convenience script `test/run-tests.sh` is also provided. This script acts as a simple wrapper around the `bats` command.
 
-- If the `timeout` command is available on your system, `run-tests.sh` will execute the tests with a short, overall timeout (default 5 seconds) applied to the entire `bats` run. This can be useful for quickly stopping runaway test suites during local development.
+- If the `timeout` command is available on your system, `run-tests.sh` will execute the tests with a timeout (default 60 seconds) applied to the entire `bats` run. This can be useful for quickly stopping runaway test suites during local development.
 - If `timeout` is not available, it simply executes `bats` directly.
 
 **Note:** The primary timeout mechanism intended for preventing individual tests from hanging indefinitely is built into the test helper (`test/test_helper.bash`) and is automatically active when running tests via the standard `bats` command as described above. The `run-tests.sh` script provides an additional, coarser-grained timeout layer.
@@ -79,12 +82,14 @@ A convenience script `test/run-tests.sh` is also provided. This script acts as a
 
 ## Test Suite Structure
 
-The test suite is divided into three main test files:
+The test suite is divided into four main test files:
 
 1. **core.bats**: Tests the core functionality including installation, adding files/directories, encryption via pre-commit hooks, and decryption via post-checkout hooks.
 
 2. **remove.bats**: Tests the removal functionality, including password verification, file cleanup, and .gitignore management.
 
 3. **errors.bats**: Tests error handling scenarios including missing dependencies, incorrect passwords, and missing files.
+
+4. **lfs.bats**: Tests Git LFS integration features, including threshold configuration, handling of large files, and fallback behavior when LFS is not available.
 
 Each test runs in isolation with its own temporary repository, ensuring that tests don't interfere with each other. 

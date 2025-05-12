@@ -2,7 +2,7 @@
 # Run tests with timeout
 
 # Configuration
-TEST_TIMEOUT=${TEST_TIMEOUT:-5}  # Default timeout in seconds
+TEST_TIMEOUT=${TEST_TIMEOUT:-60}  # Default timeout in seconds (increased to 60)
 TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Check if timeout command is available

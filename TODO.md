@@ -1,13 +1,10 @@
 # TODOs
 
-## DONE! 1 ) Single Folder for Git Vault
+## Current TODOs
 
-- **Objective**: Reduce clutter in the user's project by centralizing all things related to git-vault(except the git hooks) to a single folder.
-- The single folder on the user's project stores: all `.sh` scripts that are installed, `paths.list`, the main `README.md` of git-vault, and a subfolder for storage.
-- Name the folder `.git-vault` and the storage subfolder `.git-vault/storage`.
-- Update all and tests/docs to reflect the new design.
+Before marking a TODO done, run all tests. If they pass, mark it and the implementation plans as done. TODOs require an implementation plat and checklist in `docs/{todo name}-checklist.md`.
 
-## 2 ) Integrate 1Password for Passwords
+### 1 ) Integrate 1Password for Passwords
 
 - **Objective**: Provide a way other than file-based passwords by allowing a seamless 1Password CLI integration.
 - `install.sh` asks if they want to use 1Password  or regular file. (if the CLI is detected) otherwise it defaults to regular files.
@@ -17,7 +14,25 @@
 - `remove.sh` should remove the password from 1Password in a way similar to how file-based does, where it "marks" it removed instead of fully deleting it in case a user makes a mistake (we don't want them losing an unrecoverable decryption key)
 - Update all and tests/docs to reflect the new design. Ensure we mock 1Password's CLI interactions as best we can and doing so ONLY after doing deep research on their documentation and understanding of how it works cross-platform.
 
-## 3 ) Git LFS Integration for Large Archives
+### 2 ) Optionally Install Dependencies for Users
+
+- **Objective**: Make the `install.sh` script intelligently handle installing the dependencies on the users specific platform (windows, macos, linux) if they aren't available, and if the user chooses to.
+- The following is noted in the user-facing README.md "You need gpg, tar, sha1sum (or shasum), and mktemp installed and available in your PATH.". We'll check for those and any others that are needed when the script first starts and ask the user if they'd like us to install them ourselves.
+- Use most typical and best practice ways to install them on the given system
+- Only prompt and install for the 1 or more that are needed specifically
+- If one or more fails, exit while providing the reason it failed and returning the actual error message from the system
+- Architect in such a way that its easy for maintainers of this project to modify which dependencies will be auto-installed and their specific install method
+- Update all and tests/docs to reflect the new design.
+
+### 3 ) Support Symmetric Keys
+
+Investigate supporting Symmetric Keys for Git-Vault. Borrow inspiration from the open source project [git-crypt]([git-crypt](https://github.com/AGWA/git-crypt)) by reviewing its documentation and code. git-crypt currently supports Symmetric Keys. Generate a TODO that documents the objective and what is needed to get feature parity with git-crypt in its usage of Symmetric Keys for encrypting and decrypting files. This TODO is to create another TODO.
+
+## Completed TODOs
+
+Once TODOs are fully implemented, tested, and documented, move them here for future reference. TODOs in this section no longer need to be implemented and are kept for historical reasons.
+
+### Git LFS Integration for Large Archives
 
 - **Objective**: Automatically configure Git LFS for large encrypted archives to prevent repository bloat while maintaining versioning capabilities.
 - `install.sh` detects if Git LFS is available and sets up LFS tracking for the `storage/*.tar.gz.gpg` pattern.
@@ -30,18 +45,7 @@
 - Provide clear documentation that git-vault is fully compatible with binary large objects and any type of file without restrictions.
 - Update documentation and tests to verify LFS integration works correctly across platforms.
 
-
-# 4 ) Optionally Install Depedencies for Users
-
-- **Objective**: Make the `install.sh` script intelligently handle installing the dependencies on the users specific platform (windows, macos, linux) if they aren't available, and if the user chooses to.
-- The following is noted in the user-facing README.md "You need gpg, tar, sha1sum (or shasum), and mktemp installed and available in your PATH.". We'll check for those and any others that are needed when the script first starts and ask the user if they'd like us to install them ourselves.
-- Use most typical and best practice ways to install them on the given system
-- Only prompt and install for the 1 or more that are needed specifically
-- If one or more fails, exit while providing the reason it failed and returning the actual error message from the system
-- Architect in such a way that its easy for maintainers of this project to modify which dependencies will be auto-installed and their specific install method
-- Update all and tests/docs to reflect the new design.
-
-# DONE! 5 ) Fix The Broken Test in errors.bats
+### Fix The Broken Test in errors.bats
 
 After a recent change a test started failing that says: (`[Error] add.sh fails if gpg dependency is missing` in `test/errors.bats`) Fix it. Here is some information from the previous developer who last tried to fix it:
 
@@ -64,3 +68,10 @@ After a recent change a test started failing that says: (`[Error] add.sh fails i
     *   **Review `add.sh`:** Double-check the dependency check logic within `.git-vault/add.sh`. Ensure it's robust and doesn't have unexpected behavior when `gpg` isn't found.
     *   **Alternative Simulation:** Explore alternative ways to simulate a missing `gpg` command without altering the `PATH` directly within the test, as this seems fragile. This is challenging in Bash but might involve temporarily renaming the real `gpg` if run in a very controlled environment (use caution) or modifying the script's check if possible (less ideal).
     *   **Evaluate Necessity:** Consider if this specific test case (explicitly checking for a missing dependency via PATH manipulation) provides enough value to justify the debugging effort, given that other tests implicitly rely on `gpg` being present and functional.
+
+### Single Folder for Git Vault
+
+- **Objective**: Reduce clutter in the user's project by centralizing all things related to git-vault(except the git hooks) to a single folder.
+- The single folder on the user's project stores: all `.sh` scripts that are installed, `paths.list`, the main `README.md` of git-vault, and a subfolder for storage.
+- Name the folder `.git-vault` and the storage subfolder `.git-vault/storage`.
+- Update all and tests/docs to reflect the new design.
