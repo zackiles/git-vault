@@ -29,3 +29,14 @@
 - Explicitly support and efficiently handle binary large objects (images, videos, datasets, etc.) through Git LFS integration.
 - Provide clear documentation that git-vault is fully compatible with binary large objects and any type of file without restrictions.
 - Update documentation and tests to verify LFS integration works correctly across platforms.
+
+
+# 4 ) Optionally Install Depedencies for Users
+
+- **Objective**: Make the `install.sh` script intelligently handle installing the dependencies on the users specific platform (windows, macos, linux) if they aren't available, and if the user chooses to.
+- The following is noted in the user-facing README.md "You need gpg, tar, sha1sum (or shasum), and mktemp installed and available in your PATH.". We'll check for those and any others that are needed when the script first starts and ask the user if they'd like us to install them ourselves.
+- Use most typical and best practice ways to install them on the given system
+- Only prompt and install for the 1 or more that are needed specifically
+- If one or more fails, exit while providing the reason it failed and returning the actual error message from the system
+- Architect in such a way that its easy for maintainers of this project to modify which dependencies will be auto-installed and their specific install method
+- Update all and tests/docs to reflect the new design.

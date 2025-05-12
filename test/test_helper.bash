@@ -7,6 +7,48 @@ PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." >/dev/null 2>&1 && pwd)
 TEST_DIR="$PROJECT_ROOT/test"
 # Temporary directory for test repositories
 TMP_DIR="$TEST_DIR/tmp"
+# Default test timeout in seconds
+TEST_TIMEOUT=${TEST_TIMEOUT:-90}
+
+# Function to set up timeout for tests
+setup_test_timeout() {
+  # Only set up timeout if timeout command is available
+  if command -v timeout >/dev/null 2>&1; then
+    # Create a timeout function that will be called by bats_test_begin
+    bats_test_begin_original="$BATS_TEST_BEGIN"
+    BATS_TEST_BEGIN=bats_test_begin_with_timeout
+    bats_test_begin_with_timeout() {
+      # Start a background process that will kill the test after TEST_TIMEOUT seconds
+      (
+        sleep "$TEST_TIMEOUT"
+        echo "Test timed out after $TEST_TIMEOUT seconds: $BATS_TEST_DESCRIPTION" >&2
+        # Get the PID of the running test and kill it with SIGTERM
+        ps -o pid= -p $$ | xargs -I{} sh -c "pkill -P {} || true" >/dev/null 2>&1
+      ) &
+      timeout_pid=$!
+
+      # Call the original bats_test_begin function
+      "$bats_test_begin_original"
+    }
+
+    # Override bats_test_end to kill the timeout process
+    bats_test_end_original="$BATS_TEST_END"
+    BATS_TEST_END=bats_test_end_with_timeout
+    bats_test_end_with_timeout() {
+      # Kill the timeout process if it's still running
+      if [ -n "$timeout_pid" ]; then
+        kill "$timeout_pid" >/dev/null 2>&1 || true
+        wait "$timeout_pid" 2>/dev/null || true
+        unset timeout_pid
+      fi
+
+      # Call the original bats_test_end function
+      "$bats_test_end_original"
+    }
+  else
+    echo "Warning: 'timeout' command not found. Tests will run without timeouts." >&2
+  fi
+}
 
 # Function to set up a temporary git repository for a test
 setup_test_repo() {
@@ -108,6 +150,9 @@ setup() {
   load "$TEST_DIR/test_helper/bats-support/load.bash"
   load "$TEST_DIR/test_helper/bats-assert/load.bash"
   load "$TEST_DIR/test_helper/bats-file/load.bash"
+
+  # Set up test timeout
+  setup_test_timeout
 
   # Create the main tmp directory if it doesn't exist
   mkdir -p "$TMP_DIR"

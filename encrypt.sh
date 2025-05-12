@@ -33,9 +33,15 @@ HAS_ENCRYPTED_ANYTHING=0 # Track if we actually performed any encryption
 
 # Use IFS='' and -r to handle paths with spaces or special characters correctly
 while IFS=' ' read -r HASH PATH_IN REST || [ -n "$HASH" ]; do # Process even if last line has no newline
-  # Skip empty lines or lines not matching the expected format (hash path)
-  if [ -z "$HASH" ] || [ -z "$PATH_IN" ]; then
-    continue
+  # Skip comment lines (starting with #) and empty lines
+  case "$HASH" in
+    '#'*|'') continue ;;
+  esac
+
+  # Skip lines not matching the expected format (hash path) - simple check
+  if [ -z "$HASH" ] || [ -z "$PATH_IN" ] || [ "${#HASH}" -ne 8 ]; then
+      echo "HOOK INFO (git-vault encrypt): Skipping malformed line in $MANIFEST: $HASH $PATH_IN $REST" >&2
+      continue
   fi
 
   PWFILE="$GIT_VAULT_DIR/git-vault-$HASH.pw"
@@ -60,6 +66,14 @@ while IFS=' ' read -r HASH PATH_IN REST || [ -n "$HASH" ]; do # Process even if 
     # If the archive is *also* missing, decryption hooks might handle it.
     echo "HOOK INFO (git-vault encrypt): Plaintext path '$PATH_IN' (hash $HASH) not found in working tree. Skipping encryption for this path." >&2
     continue # Skip encryption for this path
+  fi
+
+  # 3. Check if the path is actually staged for commit
+  # Use git diff --cached --quiet to check if PATH_IN (or anything inside it if dir) is staged
+  if git diff --cached --quiet -- "$PATH_IN"; then
+    # Path is not staged, no need to re-encrypt
+    # echo "HOOK INFO (git-vault encrypt): Path '$PATH_IN' is not staged for commit. Skipping encryption." >&2
+    continue
   fi
 
   # --- Perform Encryption ---

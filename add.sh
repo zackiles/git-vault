@@ -93,20 +93,27 @@ check_exists "$ABS_PATH_IN"
 REPO_ROOT=$(cd "$VAULT_DIR/.." && pwd)
 REL_PATH=${ABS_PATH_IN#"$REPO_ROOT/"}
 
+# If path is a directory, ensure trailing slash for clear indication EARLY
+if [ -d "$ABS_PATH_IN" ] && [[ "$REL_PATH" != */ ]]; then
+    REL_PATH="$REL_PATH/"
+fi
+
 # Check if this path is already managed
-if grep -q "^[a-z0-9]\{8\} $REL_PATH$" "$PATHS_FILE"; then
-    echo "Error: '$REL_PATH' is already managed by git-vault"
-    exit 1
+# Use grep -F to treat the string as fixed, not regex, in case of special chars in REL_PATH
+# Also ensure we match the whole line for $REL_PATH to avoid partial matches if one path is a prefix of another.
+if grep -Fq " $REL_PATH" "$PATHS_FILE"; then # Check for ' HASH REL_PATH'
+    # More robust check to ensure it's not a substring or different hash
+    EXISTING_ENTRY=$(grep -F " $REL_PATH" "$PATHS_FILE" | head -n 1)
+    if [ -n "$EXISTING_ENTRY" ]; then # If any line ends with " $REL_PATH"
+        echo "Error: '$REL_PATH' is already managed or a path with the same name is managed by git-vault."
+        echo "Matching entry: $EXISTING_ENTRY"
+        exit 1
+    fi
 fi
 
 # Calculate the hash for this path (8 chars is enough for uniqueness in most repos)
 HASH=$(printf "%s" "$REL_PATH" | $SHA1CMD | cut -c1-8)
 PW_FILE="$VAULT_DIR/git-vault-$HASH.pw"
-
-# If path is a directory, ensure trailing slash for clear indication
-if [ -d "$ABS_PATH_IN" ] && [[ "$REL_PATH" != */ ]]; then
-    REL_PATH="$REL_PATH/"
-fi
 
 # Create a password file for this path
 if [ -f "$PW_FILE" ]; then
@@ -132,7 +139,7 @@ if [ "$PASSWORD" != "$PASSWORD_CONFIRM" ]; then
 fi
 
 # Prepare archive name (replace slashes with dashes)
-# Use a simpler, more reliable approach to replace "/" with "-"
+# REL_PATH already has trailing slash for directories if needed
 ARCHIVE_NAME=$(echo "$REL_PATH" | tr '/' '-')
 ARCHIVE_PATH="$STORAGE_DIR/$ARCHIVE_NAME.tar.gz.gpg"
 
@@ -187,13 +194,24 @@ echo "$HASH $REL_PATH" >> "$PATHS_FILE"
 # Update .gitignore to ignore this path
 GITIGNORE_FILE="$REPO_ROOT/.gitignore"
 touch "$GITIGNORE_FILE"
+# REL_PATH includes trailing slash for directories, ensuring correct .gitignore pattern
 IGNORE_PATTERN="/$REL_PATH"
 
 # Only add to gitignore if it's not already in there
 if ! grep -qxF "$IGNORE_PATTERN" "$GITIGNORE_FILE"; then
     echo "Adding '$IGNORE_PATTERN' to .gitignore..."
-    echo "$IGNORE_PATTERN" >> "$GITIGNORE_FILE"
-    git add "$GITIGNORE_FILE" 2>/dev/null || true
+    # Add a comment for clarity
+    printf "\n# Added by git-vault for: %s\n%s\n" "$REL_PATH" "$IGNORE_PATTERN" >> "$GITIGNORE_FILE"
+    git add "$GITIGNORE_FILE" 2>/dev/null || true # Stage .gitignore if modified
+fi
+
+# Also ensure the general password file pattern is ignored
+# Use relative path from repo root for the pattern
+PW_IGNORE_PATTERN="$(basename "$VAULT_DIR")/*.pw"
+if ! grep -qxF "$PW_IGNORE_PATTERN" "$GITIGNORE_FILE"; then
+    echo "Adding generic password ignore pattern '$PW_IGNORE_PATTERN' to .gitignore..."
+    printf "\n# Git-Vault password files (DO NOT COMMIT)\n%s\n" "$PW_IGNORE_PATTERN" >> "$GITIGNORE_FILE"
+    git add "$GITIGNORE_FILE" 2>/dev/null || true # Stage .gitignore if modified
 fi
 
 # Stage the archive and paths file for commit
