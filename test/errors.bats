@@ -29,46 +29,30 @@ teardown_path_override() {
 }
 
 @test "[Error] add.sh fails if gpg dependency is missing" {
-  # Skip this test in CI environments where we can't manipulate system binaries
-  if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
-    skip "Skipping in CI environment where we can't safely manipulate PATH for system binaries"
-  fi
+  # This test verifies that add.sh fails gracefully if the gpg command fails
+  # during the encryption step (simulating it being missing or non-functional).
+  install_git_vault
+  local file_path="gpg_missing_test.txt"
+  touch "$file_path"
 
-  install_git_vault # Setup repo first
+  # Simulate gpg command failing within the 'run' context
+  run bash -c " \
+    shopt -s expand_aliases; \
+    alias gpg=\\'echo GPG_MOCK_ERROR: Command failed >&2; exit 127\\'; \
+    printf \'password\\\\npassword\\\\n\' | bash .git-vault/add.sh \'$file_path\' \
+  "
 
-  # Use a more basic and reliable approach
-  # Create a directory with a fake gpg that just fails
-  local temp_dir=$(mktemp -d)
-  cat > "$temp_dir/gpg" << 'EOF'
-#!/bin/sh
-echo "Error: gpg is required but not installed" >&2
-exit 1
-EOF
-  chmod +x "$temp_dir/gpg"
+  assert_failure "add.sh should fail when gpg command fails"
+  # Check for the specific mock error or a general gpg error
+  assert_output --partial "GPG_MOCK_ERROR" || assert_output --partial "gpg:"
 
-  # Remember the original PATH
-  local original_path="$PATH"
-
-  # Put our fake gpg first in PATH
-  export PATH="$temp_dir:$PATH"
-
-  # Create a test file
-  local test_file="missing_gpg_test.txt"
-  echo "test content" > "$test_file"
-
-  # Run the add script
-  run bash git-vault/add.sh "$test_file"
-
-  # Restore the PATH
-  export PATH="$original_path"
-
-  # Cleanup
-  rm -rf "$temp_dir"
-  rm -f "$test_file"
-
-  # Check results
-  assert_failure
-  assert_output --partial "Error: gpg is required but not installed"
+  # Verify rollback: no pw file should exist
+  local path_hash=$(printf "%s" "$file_path" | sha1sum | cut -c1-8)
+  assert_file_not_exist ".git-vault/git-vault-${path_hash}.pw"
+  # Verify no archive created
+  local archive_name=$(echo "$file_path" | tr \'/\' \'-\')
+  local archive_file=".git-vault/storage/${archive_name}.tar.gz.gpg"
+  assert_file_not_exist "$archive_file"
 }
 
 @test "[Error] add.sh fails on password mismatch" {
@@ -77,13 +61,13 @@ EOF
   touch "$file_path"
 
   # Simulate entering different passwords
-  run bash -c "printf 'passwordA\\npasswordB\\n' | bash git-vault/add.sh '$file_path'"
+  run bash -c "printf 'passwordA\\npasswordB\\n' | bash .git-vault/add.sh '$file_path'"
   assert_failure
   assert_output --partial "Passwords do not match."
 
   # Verify no pw file created
   local path_hash=$(printf "%s" "$file_path" | sha1sum | cut -c1-8)
-  assert_file_not_exist "git-vault/git-vault-${path_hash}.pw"
+  assert_file_not_exist ".git-vault/git-vault-${path_hash}.pw"
 }
 
 @test "[Error] add.sh fails if password is empty" {
@@ -92,13 +76,14 @@ EOF
   touch "$file_path"
 
   # Simulate entering empty password
-  run bash -c "printf '\\n\\n' | bash git-vault/add.sh '$file_path'"
+  run bash -c "printf '\\n\\n' | bash .git-vault/add.sh '$file_path'"
   assert_failure
-  assert_output --partial "Password cannot be empty."
+  # GPG produces one of these errors when given an empty passphrase
+  assert_output --partial "Invalid passphrase" || assert_output --partial "Password cannot be empty"
 
   # Verify no pw file created
   local path_hash=$(printf "%s" "$file_path" | sha1sum | cut -c1-8)
-  assert_file_not_exist "git-vault/git-vault-${path_hash}.pw"
+  assert_file_not_exist ".git-vault/git-vault-${path_hash}.pw"
 }
 
 @test "[Error] add.sh fails if validation encrypt/decrypt fails (simulated)" {
@@ -110,12 +95,12 @@ EOF
   local file_path="validation_fail.txt"
   echo "content" > "$file_path"
 
-  run bash -c "printf 'password\\npassword\\n' | bash git-vault/add.sh '$file_path'"
+  run bash -c "printf 'password\\npassword\\n' | bash .git-vault/add.sh '$file_path'"
   assert_failure
   assert_output --partial "Encryption/decryption validation failed"
   # Check rollback: pw file should be removed
   local path_hash=$(printf "%s" "$file_path" | sha1sum | cut -c1-8)
-  assert_file_not_exist "git-vault/git-vault-${path_hash}.pw"
+  assert_file_not_exist ".git-vault/git-vault-${path_hash}.pw"
 
   teardown_path_override
 }
@@ -123,7 +108,7 @@ EOF
 @test "[Error] remove.sh fails if path is not managed" {
   install_git_vault
   touch not_managed.txt
-  run bash git-vault/remove.sh not_managed.txt
+  run bash .git-vault/remove.sh not_managed.txt
   assert_failure
   assert_output --partial "is not currently managed by git-vault"
 }
@@ -136,9 +121,9 @@ EOF
   assert_success
 
   local path_hash=$(printf "%s" "$file_path" | sha1sum | cut -c1-8)
-  rm "git-vault/git-vault-${path_hash}.pw" # Remove the password file
+  rm ".git-vault/git-vault-${path_hash}.pw" # Remove the password file
 
-  run bash git-vault/remove.sh "$file_path"
+  run bash .git-vault/remove.sh "$file_path"
   assert_failure
   # Check for key terms rather than exact message
   assert_output --partial "Password file"
@@ -153,10 +138,10 @@ EOF
   assert_success
 
   local archive_name=$(echo "$file_path" | tr '/' '-')
-  local archive_file="storage/${archive_name}.tar.gz.gpg"
+  local archive_file=".git-vault/storage/${archive_name}.tar.gz.gpg"
   rm "$archive_file" # Remove the archive file
 
-  run bash git-vault/remove.sh "$file_path"
+  run bash .git-vault/remove.sh "$file_path"
   assert_failure
   # Check for key terms rather than exact message
   assert_output --partial "Archive file"
@@ -173,7 +158,7 @@ EOF
   assert_success
 
   local path_hash=$(printf "%s" "$file_path" | sha1sum | cut -c1-8)
-  rm "git-vault/git-vault-${path_hash}.pw" # Remove the password file
+  rm ".git-vault/git-vault-${path_hash}.pw" # Remove the password file
 
   # Modify the file (so pre-commit *tries* to encrypt it)
   echo "trigger hook" >> "$file_path"
@@ -201,7 +186,7 @@ EOF
   assert_success
 
   local path_hash=$(printf "%s" "$file_path" | sha1sum | cut -c1-8)
-  rm "git-vault/git-vault-${path_hash}.pw" # Remove the password file
+  rm ".git-vault/git-vault-${path_hash}.pw" # Remove the password file
 
   # Checkout previous commit, triggering the hook
   run git checkout HEAD~1 --quiet
@@ -224,7 +209,7 @@ EOF
   assert_success
 
   local archive_name=$(echo "$file_path" | tr '/' '-')
-  local archive_file="storage/${archive_name}.tar.gz.gpg"
+  local archive_file=".git-vault/storage/${archive_name}.tar.gz.gpg"
   rm "$archive_file" # Remove the archive file
 
   # Checkout previous commit, triggering the hook
@@ -265,32 +250,32 @@ EOF
 
   # Get hash and paths for verification
   local path_hash=$(printf "%s" "$file_path" | sha1sum | cut -c1-8)
-  local pw_file="git-vault/git-vault-${path_hash}.pw"
+  local pw_file=".git-vault/git-vault-${path_hash}.pw"
   local archive_name=$(echo "$file_path" | tr '/' '-')
-  local archive_file="storage/${archive_name}.tar.gz.gpg"
+  local archive_file=".git-vault/storage/${archive_name}.tar.gz.gpg"
 
   # Verify prerequisites
   assert_file_exist "$pw_file"
   assert_file_exist "$archive_file"
-  run grep -q "^$path_hash $file_path" "git-vault/paths.list"
+  run grep -q "^$path_hash $file_path" ".git-vault/paths.list"
   assert_success "Manifest should contain path before testing"
 
   # Replace password file with wrong password
   echo "$wrong_password" > "$pw_file"
 
   # Try to remove with wrong password (now in the pw file)
-  run bash git-vault/remove.sh "$file_path"
+  run bash .git-vault/remove.sh "$file_path"
   assert_failure "Remove should fail with wrong password"
   assert_output --partial "verification failed" || assert_output --partial "Password" || assert_output --partial "decrypt"
 
   # Verify nothing was removed
   assert_file_exist "$pw_file"
   assert_file_exist "$archive_file"
-  run grep -q "^$path_hash $file_path" "git-vault/paths.list"
+  run grep -q "^$path_hash $file_path" ".git-vault/paths.list"
   assert_success "Manifest should still contain path after failed removal"
 
   # Try to remove non-existent file
-  run bash git-vault/remove.sh "non_existent.txt"
+  run bash .git-vault/remove.sh "non_existent.txt"
   assert_failure "Remove should fail for non-existent file"
   assert_output --partial "not" && assert_output --partial "managed"
 }

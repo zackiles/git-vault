@@ -1,224 +1,143 @@
-#!/usr/bin/env sh
-set -euo pipefail
-# Usage: add.sh <relative-path>
+#!/bin/bash
+# add.sh - Add a file or directory to git-vault
+#
+# Syntax: add.sh <path>
+#   <path> can be a file or directory
 
-# Check if file exists and exit if it doesn't
-check_exists() {
-    local file="$1"
-    if [ ! -e "$file" ]; then
-        echo "Error: '$file' does not exist"
-        exit 1
-    fi
-}
+set -e # Exit on errors
+set -u # Treat unset variables as errors
 
-# Check if dependencies are installed
-for dep in gpg tar sha1sum shasum; do
-    if command -v "$dep" >/dev/null 2>&1; then
-        if [ "$dep" = "sha1sum" ]; then
-            SHA1CMD="sha1sum"
-            break
-        elif [ "$dep" = "shasum" ]; then
-            SHA1CMD="shasum"
-            break
-        fi
-    fi
-done
-
-# For sha1, check if either sha1sum (Linux) or shasum (macOS) is available
-if [ -z "${SHA1CMD:-}" ]; then
-    echo "Error: Either sha1sum or shasum is required"
-    exit 1
+# --- Initial Validation ---
+if [ $# -lt 1 ]; then
+  echo "Error: Missing required argument <path>."
+  echo "Usage: add.sh <path>"
+  exit 1
 fi
 
-# Ensure required commands exist
-for cmd in gpg tar; do
-    if ! command -v "$cmd" >/dev/null 2>&1; then
-        echo "Error: $cmd is required but not installed"
-        exit 1
-    fi
-done
+# Get the input path (handling spaces)
+PATH_TO_PROTECT="$1"
+# Remove any trailing slash from directories
+PATH_TO_PROTECT="${PATH_TO_PROTECT%/}"
+IS_DIRECTORY=false
 
-# Check GPG version for compatibility
-GPG_VERSION=$(gpg --version | head -n 1 | awk '{print $3}')
-GPG_MAJOR=$(echo "$GPG_VERSION" | cut -d. -f1)
-GPG_MINOR=$(echo "$GPG_VERSION" | cut -d. -f2)
-
-if [ "$GPG_MAJOR" -lt 2 ]; then
-    echo "Warning: Using GPG version $GPG_VERSION. Version 2.0 or higher is recommended."
-    # We don't exit as old versions may still work
+# Check if path exists
+if [ ! -e "$PATH_TO_PROTECT" ]; then
+  echo "Error: '$PATH_TO_PROTECT' does not exist."
+  exit 1
 fi
 
+# Check if it's a directory
+if [ -d "$PATH_TO_PROTECT" ]; then
+  IS_DIRECTORY=true
+  # For dirs, we add the trailing slash back for consistency in the manifest
+  PATH_TO_PROTECT="${PATH_TO_PROTECT}/"
+fi
+
+# --- Path Normalization ---
+# Get the absolute path (resolving symbolic links)
+REAL_PATH=$(realpath "$PATH_TO_PROTECT")
+
+# --- Environment Setup ---
 # Get the vault directories (from the script location)
 SCRIPT_DIR=$(dirname "$0")
-VAULT_DIR="$SCRIPT_DIR"
-STORAGE_DIR="$(dirname "$VAULT_DIR")/storage"
-PATHS_FILE="$VAULT_DIR/paths.list"
+GIT_VAULT_DIR=".git-vault"
+STORAGE_DIR="$GIT_VAULT_DIR/storage"
+PATHS_FILE="$GIT_VAULT_DIR/paths.list"
 
 # Ensure paths file exists
 [ -f "$PATHS_FILE" ] || touch "$PATHS_FILE"
 mkdir -p "$STORAGE_DIR"
 
-# Validate input path
-[ $# -ne 1 ] && echo "Usage: $0 <path-to-encrypt>" && exit 1
-PATH_IN="$1"
-
-# Portable way to get absolute path (works on Linux and macOS)
-get_absolute_path() {
-    local path="$1"
-    # Check if it's already absolute
-    case "$path" in
-        /*) echo "$path" ;;
-        *)  # Relative path - make absolute
-            echo "$(cd "$(dirname "$path")" && pwd)/$(basename "$path")"
-            ;;
-    esac
-}
-
-# Get absolute path for input
-if [ -e "$PATH_IN" ]; then
-    # If the path exists, we can use the more reliable method
-    ABS_PATH_IN=$(get_absolute_path "$PATH_IN")
-else
-    # Handle paths that don't exist yet (needed for canonicalize-missing behavior)
-    ABS_PATH_IN="$(cd "$(dirname "$PATH_IN")" 2>/dev/null && pwd)/$(basename "$PATH_IN")" || {
-        echo "Error: Invalid path or directory in '$PATH_IN'"
-        exit 1
-    }
+# --- Path Hash Generation ---
+# Create a unique identifier based on the path (for file names)
+PATH_HASH=$(printf "%s" "$PATH_TO_PROTECT" | sha1sum | cut -c1-8)
+# Check if path is already managed
+if grep -q "^$PATH_HASH " "$PATHS_FILE"; then
+  echo "Error: '$PATH_TO_PROTECT' is already managed by git-vault."
+  exit 1
 fi
 
-# Ensure the path exists
-check_exists "$ABS_PATH_IN"
+# --- Password Collection ---
+PW_FILE="$GIT_VAULT_DIR/git-vault-${PATH_HASH}.pw"
 
-# Get the relative path from the repo root
-REPO_ROOT=$(cd "$VAULT_DIR/.." && pwd)
-REL_PATH=${ABS_PATH_IN#"$REPO_ROOT/"}
+# Securely prompt for password
+echo "Enter encryption password for '$PATH_TO_PROTECT':"
+read -r -s PASSWORD
+echo "Confirm password:"
+read -r -s PASSWORD_CONFIRM
 
-# If path is a directory, ensure trailing slash for clear indication EARLY
-if [ -d "$ABS_PATH_IN" ] && [[ "$REL_PATH" != */ ]]; then
-    REL_PATH="$REL_PATH/"
-fi
-
-# Check if this path is already managed
-# Use grep -F to treat the string as fixed, not regex, in case of special chars in REL_PATH
-# Also ensure we match the whole line for $REL_PATH to avoid partial matches if one path is a prefix of another.
-if grep -Fq " $REL_PATH" "$PATHS_FILE"; then # Check for ' HASH REL_PATH'
-    # More robust check to ensure it's not a substring or different hash
-    EXISTING_ENTRY=$(grep -F " $REL_PATH" "$PATHS_FILE" | head -n 1)
-    if [ -n "$EXISTING_ENTRY" ]; then # If any line ends with " $REL_PATH"
-        echo "Error: '$REL_PATH' is already managed or a path with the same name is managed by git-vault."
-        echo "Matching entry: $EXISTING_ENTRY"
-        exit 1
-    fi
-fi
-
-# Calculate the hash for this path (8 chars is enough for uniqueness in most repos)
-HASH=$(printf "%s" "$REL_PATH" | $SHA1CMD | cut -c1-8)
-PW_FILE="$VAULT_DIR/git-vault-$HASH.pw"
-
-# Create a password file for this path
-if [ -f "$PW_FILE" ]; then
-    echo "ERROR: Password file already exists for another path with same hash."
-    echo "Please try renaming '$REL_PATH' slightly to get a different hash."
-    exit 1
-fi
-
-# Allow user to set a password
-echo "Enter password for '$REL_PATH': "
-read -r PASSWORD
-echo "Confirm password: "
-read -r PASSWORD_CONFIRM
-
-if [ -z "$PASSWORD" ]; then
-    echo "Error: Password cannot be empty."
-    exit 1
-fi
-
+# Verify passwords match
 if [ "$PASSWORD" != "$PASSWORD_CONFIRM" ]; then
-    echo "Error: Passwords do not match."
-    exit 1
+  echo "Error: Passwords do not match."
+  exit 1
 fi
 
-# Prepare archive name (replace slashes with dashes)
-# REL_PATH already has trailing slash for directories if needed
-ARCHIVE_NAME=$(echo "$REL_PATH" | tr '/' '-')
-ARCHIVE_PATH="$STORAGE_DIR/$ARCHIVE_NAME.tar.gz.gpg"
+# --- Create Archive ---
+# Create temporary directory
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TEMP_DIR"' EXIT
 
-# IMPORTANT: Create the parent directory for the archive
-mkdir -p "$STORAGE_DIR"
-# Ensure parent directory of the archive exists (in case of slashes in ARCHIVE_NAME)
-mkdir -p "$(dirname "$ARCHIVE_PATH")"
+# Determine archive name (replace slashes with hyphens)
+ARCHIVE_NAME=$(echo "$PATH_TO_PROTECT" | tr '/' '-')
+ARCHIVE_FILE="${STORAGE_DIR}/${ARCHIVE_NAME}.tar.gz.gpg"
 
-# Create temporary file for the password
-TEMP_FILE=$(mktemp)
-# Extract original on exit
-cleanup() {
-  [ -f "$TEMP_FILE" ] && rm -f "$TEMP_FILE"
-}
-trap cleanup EXIT
+if $IS_DIRECTORY; then
+  # For directories, we can't just use tar's -C option because we want
+  # to preserve the final directory name in the archive.
+  # So we create a parent directory in the temp dir.
+  PARENT_DIR=$(dirname "$PATH_TO_PROTECT")
+  BASE_NAME=$(basename "$PATH_TO_PROTECT")
+  mkdir -p "$TEMP_DIR/src"
+  cp -a "$REAL_PATH" "$TEMP_DIR/src/"
 
-echo "$PASSWORD" > "$TEMP_FILE"
-
-# Create archive of the path
-echo "Creating encrypted archive for '$REL_PATH'..."
-if [ -d "$ABS_PATH_IN" ]; then
-    # For directories, tar from inside the dir to avoid full paths
-    (cd "$(dirname "$ABS_PATH_IN")" && tar -czf - "$(basename "$ABS_PATH_IN")") | \
-    gpg --batch --yes --passphrase-file "$TEMP_FILE" -c -o "$ARCHIVE_PATH"
+  # Create the archive from our temporary structure
+  tar -czf "$TEMP_DIR/archive.tar.gz" -C "$TEMP_DIR/src" "$BASE_NAME"
 else
-    # For files, tar them directly
-    tar -czf - -C "$(dirname "$ABS_PATH_IN")" "$(basename "$ABS_PATH_IN")" | \
-    gpg --batch --yes --passphrase-file "$TEMP_FILE" -c -o "$ARCHIVE_PATH"
+  # For files, we can just archive directly
+  tar -czf "$TEMP_DIR/archive.tar.gz" -C "$(dirname "$REAL_PATH")" "$(basename "$REAL_PATH")"
 fi
 
-# Validation: Try to decrypt and extract to ensure it works
-echo "Validating encryption/decryption..."
-VALIDATION_DIR=$(mktemp -d)
-# Cleanup on exit
-cleanup_validation() {
-  [ -d "$VALIDATION_DIR" ] && rm -rf "$VALIDATION_DIR"
-}
-trap cleanup_validation EXIT
-
-if ! gpg --batch --yes --passphrase-file "$TEMP_FILE" -d "$ARCHIVE_PATH" | \
-     tar -xzf - -C "$VALIDATION_DIR"; then
-    echo "Error: Encryption/decryption validation failed."
-    rm -f "$ARCHIVE_PATH" # Cleanup failed archive
-    rm -f "$TEMP_FILE"
-    exit 1
-fi
-
-# All validations passed - save the password and update the manifest
+# Encrypt the archive
+echo "$PASSWORD" | gpg --batch --yes --passphrase-fd 0 -c -o "$ARCHIVE_FILE" "$TEMP_DIR/archive.tar.gz"
 echo "$PASSWORD" > "$PW_FILE"
-echo "$HASH $REL_PATH" >> "$PATHS_FILE"
+chmod 600 "$PW_FILE"  # Secure the password file
 
-# Update .gitignore to ignore this path
-GITIGNORE_FILE="$REPO_ROOT/.gitignore"
-touch "$GITIGNORE_FILE"
-# REL_PATH includes trailing slash for directories, ensuring correct .gitignore pattern
-IGNORE_PATTERN="/$REL_PATH"
+# --- Update Manifest ---
+# Add entry to the paths file
+echo "$PATH_HASH $PATH_TO_PROTECT" >> "$PATHS_FILE"
 
-# Only add to gitignore if it's not already in there
-if ! grep -qxF "$IGNORE_PATTERN" "$GITIGNORE_FILE"; then
-    echo "Adding '$IGNORE_PATTERN' to .gitignore..."
-    # Add a comment for clarity
-    printf "\n# Added by git-vault for: %s\n%s\n" "$REL_PATH" "$IGNORE_PATTERN" >> "$GITIGNORE_FILE"
-    git add "$GITIGNORE_FILE" 2>/dev/null || true # Stage .gitignore if modified
+# --- Update .gitignore ---
+# Define gitignore location
+GITIGNORE_FILE=".gitignore"
+GITIGNORE_PATTERN="/$PATH_TO_PROTECT"
+PW_IGNORE_PATTERN="$GIT_VAULT_DIR/*.pw"
+PW_COMMENT_LINE="# Git-Vault password files (DO NOT COMMIT)"
+
+# Create .gitignore if it doesn't exist
+if [ ! -f "$GITIGNORE_FILE" ]; then
+  touch "$GITIGNORE_FILE"
 fi
 
-# Also ensure the general password file pattern is ignored
-# Use relative path from repo root for the pattern
-PW_IGNORE_PATTERN="$(basename "$VAULT_DIR")/*.pw"
+# Check if pattern already exists
+if ! grep -qxF "$GITIGNORE_PATTERN" "$GITIGNORE_FILE"; then
+  # Add the path pattern to .gitignore
+  echo "$GITIGNORE_PATTERN" >> "$GITIGNORE_FILE"
+  echo "Added '$GITIGNORE_PATTERN' to .gitignore."
+fi
+
+# Check if password ignore pattern exists
 if ! grep -qxF "$PW_IGNORE_PATTERN" "$GITIGNORE_FILE"; then
-    echo "Adding generic password ignore pattern '$PW_IGNORE_PATTERN' to .gitignore..."
-    printf "\n# Git-Vault password files (DO NOT COMMIT)\n%s\n" "$PW_IGNORE_PATTERN" >> "$GITIGNORE_FILE"
-    git add "$GITIGNORE_FILE" 2>/dev/null || true # Stage .gitignore if modified
+  # Add the comment and pattern
+  echo "$PW_COMMENT_LINE" >> "$GITIGNORE_FILE"
+  echo "$PW_IGNORE_PATTERN" >> "$GITIGNORE_FILE"
+  echo "Added password ignore pattern to .gitignore."
 fi
 
-# Stage the archive and paths file for commit
-git add "$ARCHIVE_PATH" "$PATHS_FILE" 2>/dev/null || true
+# --- Stage Files for Commit ---
+# Add the relevant files to git staging
+git add "$ARCHIVE_FILE" "$PATHS_FILE" "$GITIGNORE_FILE" > /dev/null 2>&1 || true
 
-echo "Success: '$REL_PATH' is now managed by git-vault."
-echo "Archive stored in: $ARCHIVE_PATH"
+# --- Success ---
 echo "Password saved in: $PW_FILE"
-echo "IMPORTANT: Commit the changes to .gitignore, paths.list, and the archive!"
-exit 0
+echo "Archive stored in: $ARCHIVE_FILE"
+echo "Success: '$PATH_TO_PROTECT' is now managed by git-vault."

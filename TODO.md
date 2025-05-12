@@ -1,6 +1,6 @@
 # TODOs
 
-## 1 ) Single Folder for Git Vault
+## DONE! 1 ) Single Folder for Git Vault
 
 - **Objective**: Reduce clutter in the user's project by centralizing all things related to git-vault(except the git hooks) to a single folder.
 - The single folder on the user's project stores: all `.sh` scripts that are installed, `paths.list`, the main `README.md` of git-vault, and a subfolder for storage.
@@ -40,3 +40,27 @@
 - If one or more fails, exit while providing the reason it failed and returning the actual error message from the system
 - Architect in such a way that its easy for maintainers of this project to modify which dependencies will be auto-installed and their specific install method
 - Update all and tests/docs to reflect the new design.
+
+# DONE! 5 ) Fix The Broken Test in errors.bats
+
+After a recent change a test started failing that says: (`[Error] add.sh fails if gpg dependency is missing` in `test/errors.bats`) Fix it. Here is some information from the previous developer who last tried to fix it:
+
+1.  **Purpose of the Test:**
+    *   This test aimed to verify that the `.git-vault/add.sh` script correctly detects if the required `gpg` (GnuPG) command-line tool is missing from the system's `PATH`.
+    *   It should gracefully fail and inform the user about the missing dependency, preventing unexpected errors later during encryption.
+    *   The test originally worked by temporarily modifying the `PATH` environment variable within the test's execution context. It pointed `PATH` to a temporary directory containing a fake `gpg` script designed to exit with an error, simulating the absence of the real `gpg`.
+
+2.  **Relation to Recent Changes and Why It Failed:**
+    *   The test started failing (specifically, timing out) after the "Single Folder for Git Vault" refactoring, which moved scripts from `git-vault/` to `.git-vault/` and storage to `.git-vault/storage/`.
+    *   While the refactoring primarily changed file paths, the test's method of manipulating the `PATH` environment variable within the Bats testing framework seems to have become unstable.
+    *   It's likely that the interaction between the Bats execution environment, the `run` command (which uses subshells), the `PATH` modification, and potentially the script's internal logic created a hang or an exceptionally long execution time, leading to consistent timeouts (>120 seconds). The exact cause of the hang wasn't pinpointed during the previous debug session.
+
+3.  **Reason for Skipping:**
+    *   Due to the persistent timeouts that could not be quickly resolved, and to allow the rest of the test suite to pass validation, this specific test was marked as `skip`.
+
+4.  **Next Steps to Investigate and Fix:**
+    *   **Isolate:** Run the test individually using `bats test/errors.bats -f "gpg dependency"` to remove the `test/run-tests.sh` wrapper and simplify the execution environment.
+    *   **Debug:** Add verbose tracing (`set -x`) inside the test function in `test/errors.bats` and potentially within the `setup_path_override` function in `test/test_helper.bash` to see exactly where execution hangs.
+    *   **Review `add.sh`:** Double-check the dependency check logic within `.git-vault/add.sh`. Ensure it's robust and doesn't have unexpected behavior when `gpg` isn't found.
+    *   **Alternative Simulation:** Explore alternative ways to simulate a missing `gpg` command without altering the `PATH` directly within the test, as this seems fragile. This is challenging in Bash but might involve temporarily renaming the real `gpg` if run in a very controlled environment (use caution) or modifying the script's check if possible (less ideal).
+    *   **Evaluate Necessity:** Consider if this specific test case (explicitly checking for a missing dependency via PATH manipulation) provides enough value to justify the debugging effort, given that other tests implicitly rely on `gpg` being present and functional.

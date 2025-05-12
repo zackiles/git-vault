@@ -1,0 +1,14 @@
+---
+description: When searching the codebase and project for information
+globs:
+alwaysApply: false
+---
+# Important
+Before using your tools to understand the codebase, start by reviewing the following known files:
+
+- General Overview of Git-Vault: `<project-root>/test/README.md`
+- Testing and Development documentation: `<project-root>/test/README.md`
+  - Ensure when debugging tests you use [run-tests.sh](mdc:test/run-tests.sh) to be able to set a timeout as some tests in this suite can hang occasionally.
+- Single File Snapshot of Codebase: Repomix is used to peridocially take a snapshot of the entire codebase into a single xml file that can be found at `<project-root>/.ai/context/codebase-context.xml`
+  - It needs to be re-generated after large changes to the codebase by running the script in `<project-root>/.ai/build-context.sh`
+- Release Workflows: `<project-root>/test/RELEASING.md`
