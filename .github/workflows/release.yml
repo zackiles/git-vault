@@ -68,4 +68,5 @@ jobs:
           gh release create ${{ steps.get_tag.outputs.TAG }} \
             release_assets/* \
             --title "Release ${{ steps.get_tag.outputs.TAG }}" \
-            --notes-file ${{ steps.get_commit_message.outputs.NOTES_FILE }}
+            --notes-file ${{ steps.get_commit_message.outputs.NOTES_FILE }} \
+            --replace
