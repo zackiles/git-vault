@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # Git hook script: pre-commit - Encrypts managed paths before commit.
 
-set -eu # Exit on error, treat unset variables as error.
+set -e # Exit on error
 # pipefail is intentionally omitted here as the loop might process an empty manifest.
 
 # --- Dependency Checks ---

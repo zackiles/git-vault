@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-set -euo pipefail
+set -e
 
 # --- Constants ---
 # Allow configuration of release URL via environment variable (useful for testing)

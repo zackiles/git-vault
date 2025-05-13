@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-set -euo pipefail
+set -e
 # Usage: remove.sh <relative-path>
 
 # --- 1Password Helper Functions ---
