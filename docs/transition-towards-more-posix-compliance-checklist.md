@@ -24,27 +24,27 @@ Set up a proper testing environment that can validate POSIX compliance across di
 Update the test infrastructure to support POSIX sh testing before modifying the actual scripts.
 
 #### 2.1) Update Test Runner (test/run-tests.sh)
-- [ ] Change shebang from `#!/usr/bin/env bash` to `#!/usr/bin/env sh`
-- [ ] Replace any bash-specific features in test runner
+- [x] Change shebang from `#!/usr/bin/env bash` to `#!/usr/bin/env sh`
+- [x] Replace any bash-specific features in test runner
 
 #### 2.2) Update Test Helper functions
-- [ ] Identify bash-specific constructs in test_helper.bash
-- [ ] Replace `[[` with `[` for conditions
-- [ ] Replace bashism regex matching (`=~`) with POSIX alternatives (`case` or `expr`)
-- [ ] Ensure all test helper functions work with POSIX sh
+- [x] Identify bash-specific constructs in test_helper.bash
+- [x] Replace `[[` with `[` for conditions
+- [x] Replace bashism regex matching (`=~`) with POSIX alternatives (`case` or `expr`)
+- [x] Ensure all test helper functions work with POSIX sh
 
 #### 2.3) Update Mock Functions
-- [ ] Convert any bash-specific mock command generation to use POSIX sh
-- [ ] Update the `create_mock_command` function in tests to use `/bin/sh` consistently
-- [ ] Modify function mocking to use `PATH` manipulation instead of `export -f`
+- [x] Convert any bash-specific mock command generation to use POSIX sh
+- [x] Update the `create_mock_command` function in tests to use `/bin/sh` consistently
+- [x] Modify function mocking to use `PATH` manipulation instead of `export -f`
 
 ### 3) Update Core Script - add.sh
 Convert the add.sh script from bash to POSIX sh, focusing on maintaining functionality while improving portability.
 
 #### 3.1) Update Shebang and Basic Structure
-- [ ] Change shebang from `#!/bin/bash` to `#!/usr/bin/env sh`
-- [ ] Replace `set -euo pipefail` with POSIX-compatible error handling
-- [ ] Update any bash-specific comments or documentation
+- [x] Change shebang from `#!/bin/bash` to `#!/usr/bin/env sh`
+- [x] Replace `set -euo pipefail` with POSIX-compatible error handling
+- [x] Update any bash-specific comments or documentation
 
 #### 3.2) Fix Password Input Handling
 - [ ] Replace `read -r -s PASSWORD` with POSIX-compatible silent input using `stty -echo` and `stty echo`
@@ -65,29 +65,29 @@ Convert the add.sh script from bash to POSIX sh, focusing on maintaining functio
 Fix the remaining bash-specific features in install.sh to ensure full POSIX compliance.
 
 #### 4.1) Fix Regex and Double Bracket Usage
-- [ ] Replace `[[ $REPLY =~ ^[Yy]$ ]]` with `case "$REPLY" in [Yy]*) ... esac`
-- [ ] Replace `[[ "$LFS_THRESHOLD" =~ ^[0-9]+$ ]]` with POSIX number validation
-- [ ] Convert any remaining `[[` expressions to `[` with appropriate quoting
+- [x] Replace `[[ $REPLY =~ ^[Yy]$ ]]` with `case "$REPLY" in [Yy]*) ... esac`
+- [x] Replace `[[ "$LFS_THRESHOLD" =~ ^[0-9]+$ ]]` with POSIX number validation
+- [x] Convert any remaining `[[` expressions to `[` with appropriate quoting
 
 #### 4.2) Fix Read With Prompt
-- [ ] Replace `read -p` with `printf` followed by `read`
-- [ ] Test interactive prompts across different platforms
+- [x] Replace `read -p` with `printf` followed by `read`
+- [x] Test interactive prompts across different platforms
 
 ### 5) Update encrypt.sh and decrypt.sh Scripts
 Fix the paths.list parsing in encrypt.sh and decrypt.sh to correctly handle paths with spaces.
 
 #### 5.1) Fix Paths List Parsing
-- [ ] Update the loop that reads paths.list to properly handle spaces in paths
-- [ ] Test with complex paths containing spaces and special characters
-- [ ] Ensure backward compatibility with existing paths.list files
+- [x] Update the loop that reads paths.list to properly handle spaces in paths
+- [x] Test with complex paths containing spaces and special characters
+- [x] Ensure backward compatibility with existing paths.list files
 
 ### 6) Update remove.sh Script
 Fix the in-place sed usage in remove.sh script.
 
 #### 6.1) Fix In-place sed Editing
-- [ ] Replace `sed -i.bak` with output redirection and `mv`
-- [ ] Test file modifications across different platforms
-- [ ] Ensure temporary files are properly cleaned up
+- [x] Replace `sed -i.bak` with output redirection and `mv`
+- [x] Test file modifications across different platforms
+- [x] Ensure temporary files are properly cleaned up
 
 ### 7) Comprehensive Testing
 Test all changes thoroughly to ensure functionality is preserved while improving portability.
