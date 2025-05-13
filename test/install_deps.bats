@@ -224,7 +224,7 @@ EOF
 
   # Create a test script with a basic implementation
   cat > "$TEMP_PATH_DIR/simple_check.sh" <<EOF
-#!/bin/bash
+#!/bin/sh
 echo " tar mktemp sha1sum/shasum"
 EOF
   chmod +x "$TEMP_PATH_DIR/simple_check.sh"

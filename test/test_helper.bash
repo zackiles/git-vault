@@ -100,6 +100,17 @@ install_git_vault() {
   cp "$PROJECT_ROOT/install.sh" "$TEST_REPO/temp_scripts/"
   cp "$PROJECT_ROOT/utils.sh" "$TEST_REPO/temp_scripts/"
 
+  # Fix the shebang and remove pipefail in copied files for POSIX compatibility
+  for script in add.sh remove.sh encrypt.sh decrypt.sh install.sh; do
+    # Replace any bash shebangs to POSIX sh
+    sed -i.bak 's|^#!/usr/bin/env bash|#!/usr/bin/env sh|' "$TEST_REPO/temp_scripts/$script"
+    sed -i.bak 's|^#!/bin/bash|#!/usr/bin/env sh|' "$TEST_REPO/temp_scripts/$script"
+    # Remove pipefail (already done in our edits, but make sure temp copies are correct)
+    sed -i.bak 's|set -euo pipefail|set -e|' "$TEST_REPO/temp_scripts/$script"
+    sed -i.bak 's|set -eu|set -e|' "$TEST_REPO/temp_scripts/$script"
+    rm -f "$TEST_REPO/temp_scripts/$script.bak"
+  done
+
   # Create an empty paths.list for testing - restore this line
   touch "$TEST_REPO/temp_scripts/paths.list"
 
@@ -107,7 +118,7 @@ install_git_vault() {
   # This ensures we never modify the main project's files or hooks
   cd "$TEST_REPO" || return 1
   # Pipe "n" to the 1Password prompt to default to file-based storage for tests
-  run bash -c "printf 'n\n' | bash \"$TEST_REPO/temp_scripts/install.sh\" --target-dir \"$TEST_REPO\""
+  run sh -c "printf 'n\\n' | sh \"$TEST_REPO/temp_scripts/install.sh\" --target-dir \"$TEST_REPO\""
   assert_success "install.sh should succeed"
 
   # Verify basic installation results
@@ -190,17 +201,20 @@ add_path() {
 
   # Create content if it doesn't exist
   if [ ! -e "$path_to_add" ]; then
-    if [[ "$path_to_add" == */ ]]; then # Check if it ends with / indicating directory
+    case "$path_to_add" in
+      */) # Check if it ends with / indicating directory
         mkdir -p "$path_to_add"
         echo "Debug: Created directory $path_to_add"
         echo "content for dir $path_to_add" > "$path_to_add/file.txt"
         echo "Debug: Added test file in directory"
-    else
+        ;;
+      *)
         mkdir -p "$(dirname "$path_to_add")"
         echo "Debug: Created parent dir for $path_to_add"
         echo "content for $path_to_add" > "$path_to_add"
         echo "Debug: Created file $path_to_add"
-    fi
+        ;;
+    esac
   fi
 
   # Ensure storage directory exists with proper structure

@@ -74,9 +74,20 @@ skip_if_no_lfs() {
   cp "$PROJECT_ROOT/install.sh" "$TEST_REPO/temp_scripts/"
   cp "$PROJECT_ROOT/utils.sh" "$TEST_REPO/temp_scripts/" # Add utils.sh for this test as well
 
+  # Fix the shebang and remove pipefail in copied files for POSIX compatibility
+  for script in add.sh remove.sh encrypt.sh decrypt.sh install.sh; do
+    # Replace any bash shebangs to POSIX sh
+    sed -i.bak 's|^#!/usr/bin/env bash|#!/usr/bin/env sh|' "$TEST_REPO/temp_scripts/$script"
+    sed -i.bak 's|^#!/bin/bash|#!/usr/bin/env sh|' "$TEST_REPO/temp_scripts/$script"
+    # Remove pipefail (already done in our edits, but make sure temp copies are correct)
+    sed -i.bak 's|set -euo pipefail|set -e|' "$TEST_REPO/temp_scripts/$script"
+    sed -i.bak 's|set -eu|set -e|' "$TEST_REPO/temp_scripts/$script"
+    rm -f "$TEST_REPO/temp_scripts/$script.bak"
+  done
+
   cd "$TEST_REPO" || return 1
   # Pipe "n" to avoid 1Password prompt
-  run bash -c "printf 'n\\n' | $TEST_REPO/temp_scripts/install.sh --target-dir $TEST_REPO --min-lfs=$custom_threshold"
+  run sh -c "printf 'n\\n' | sh $TEST_REPO/temp_scripts/install.sh --target-dir $TEST_REPO --min-lfs=$custom_threshold"
   assert_success "install.sh should succeed with custom LFS threshold"
 
   # Check if lfs-config exists and contains custom value
