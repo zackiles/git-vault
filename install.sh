@@ -1,9 +1,45 @@
 #!/usr/bin/env sh
 set -e
 
+# --- Handle TTY / Piped Execution ---
+# Check if we're being piped (no TTY) but need TTY for prompts
+if [ ! -t 0 ]; then
+  # We're being run via a pipe (curl | bash), so we need to re-execute with a TTY
+  TEMP_SCRIPT=$(mktemp)
+  # Use the same URL source (whether official or testing)
+  if [ -n "${GIT_VAULT_RELEASE_URL:-}" ]; then
+    SCRIPT_URL="${GIT_VAULT_RELEASE_URL}/install.sh"
+  else
+    SCRIPT_URL="https://github.com/zackiles/git-vault/releases/latest/download/install.sh"
+  fi
+
+  echo "Running in a pipe - downloading script for proper interactive mode..."
+  if command -v curl > /dev/null; then
+    curl -sSL "$SCRIPT_URL" > "$TEMP_SCRIPT"
+  elif command -v wget > /dev/null; then
+    wget -q "$SCRIPT_URL" -O "$TEMP_SCRIPT"
+  else
+    echo "Error: Neither curl nor wget found. Cannot download script for interactive mode"
+    exit 1
+  fi
+
+  chmod +x "$TEMP_SCRIPT"
+  # Re-execute with the same arguments but with TTY access
+  if [ -t 1 ]; then
+    # We have a TTY for stdout, use it for stdin too
+    exec "$TEMP_SCRIPT" "$@" < /dev/tty
+  else
+    # No TTY available at all, proceed with defaults
+    echo "No TTY available, proceeding with non-interactive installation..."
+    # Continue with the current execution
+  fi
+  # We'll only get here if the re-exec doesn't happen
+  rm -f "$TEMP_SCRIPT"
+fi
+
 # --- Constants ---
 # Allow configuration of release URL via environment variable (useful for testing)
-GITHUB_RELEASE_BASE_URL="${GIT_VAULT_RELEASE_URL:-https://github.com/zacharyiles/git-vault/releases/latest/download}"
+GITHUB_RELEASE_BASE_URL="${GIT_VAULT_RELEASE_URL:-https://github.com/zackiles/git-vault/releases/latest/download}"
 EMBEDDED_PATHS_LIST="# Git-Vault Managed Paths
 # Format: <file-path>#<hash>
 # Do not edit manually"
@@ -249,7 +285,7 @@ download_or_use_local() {
   # If local file not found, try to download from GitHub releases
   echo "Local copy of ${filename} not found, downloading from GitHub releases..."
   if command -v curl > /dev/null; then
-    if ! curl -sSL "${GITHUB_RELEASE_BASE_URL}/${filename}" -o "${target_path}"; then
+    if ! curl -fsSL "${GITHUB_RELEASE_BASE_URL}/${filename}" -o "${target_path}"; then
       echo "Error: Failed to download ${filename} using curl"
       return 1
     fi
