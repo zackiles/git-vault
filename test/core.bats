@@ -51,39 +51,66 @@ load 'test_helper'
 
 @test "[Core] add.sh adds a directory, creates pw, archive, updates manifest, .gitignore" {
   install_git_vault
-  local dir_path="sensitive_data/"
+  local dir_path="sensitive_data/" # Path already includes trailing slash
   local password="dirpass456"
+
+  # Calculate expected hash and filenames, ensuring trailing slash is used for hash
+  local path_hash=$(printf "%s" "$dir_path" | sha1sum | cut -c1-8)
+  local pw_file=".git-vault/git-vault-${path_hash}.pw"
+  # Archive name uses path with trailing slash, then replaces / with -
+  local archive_name=$(echo "$dir_path" | tr '/' '-')
+  local archive_file=".git-vault/storage/${archive_name}.tar.gz.gpg"
+  local gitignore_pattern="/$dir_path"
+
+  echo "DEBUG core.bats: dir_path='$dir_path'"
+  echo "DEBUG core.bats: path_hash='$path_hash'"
+  echo "DEBUG core.bats: pw_file='$pw_file'"
+  echo "DEBUG core.bats: archive_name='$archive_name'"
+  echo "DEBUG core.bats: archive_file='$archive_file'"
+  echo "DEBUG core.bats: gitignore_pattern='$gitignore_pattern'"
 
   # Create the directory before adding
   mkdir -p "$dir_path"
   echo "secret stuff" > "${dir_path}file1.txt"
 
+  # Add the directory
   add_path "$dir_path" "$password"
+  assert_success
 
-  # Extract the actual hash and paths from the script output
-  local actual_pw_file=$(echo "$output" | grep "Password saved in:" | sed -E 's/.*git-vault-([a-f0-9]{8})\.pw.*/\1/')
-  local actual_archive_file=$(echo "$output" | grep "Archive stored in:" | sed -E 's/.*storage\/([^\.]+\.tar\.gz\.gpg).*/\1/')
+  # The output should contain success message
+  assert_output --partial "Success: '${dir_path}' is now managed by git-vault."
 
-  local pw_file=".git-vault/git-vault-${actual_pw_file}.pw"
-  local archive_file=".git-vault/storage/${actual_archive_file}"
+  # Verify files created/updated
+  echo "DEBUG core.bats: Checking existence of pw_file: $pw_file"
+  ls -la .git-vault/ >&2
+  assert_file_exist "$pw_file" "Password file for directory should exist"
 
-  assert_output --partial "Success: '$dir_path' is now managed by git-vault."
-  assert_file_exist "$pw_file"
-  assert_file_exist "$archive_file"
+  echo "DEBUG core.bats: Checking existence of archive_file: $archive_file"
+  ls -la .git-vault/storage/ >&2
+  assert_file_exist "$archive_file" "Archive file for directory should exist"
 
-  # Check paths.list with the actual hash
-  run grep -q "^${actual_pw_file} $dir_path" ".git-vault/paths.list"
-  assert_success "Manifest should contain hash and path for directory '$dir_path'"
+  assert_file_exist ".git-vault/paths.list"
+  assert_file_exist ".gitignore"
 
-  # Check gitignore
-  local gitignore_pattern="/$dir_path" # Remove the trailing slash since dir_path already has one
+  # Check paths.list was updated with the directory entry (including trailing slash)
+  echo "DEBUG core.bats: Content of .git-vault/paths.list before assertion:"
+  cat .git-vault/paths.list >&2
+  run grep -q "^$path_hash ${dir_path}" ".git-vault/paths.list"
+  assert_success "Manifest should contain entry for directory '${dir_path}' with trailing slash"
+
+  # Check .gitignore was updated (should include trailing slash)
+  echo "DEBUG core.bats: Content of .gitignore before assertion:"
+  cat .gitignore >&2
   run grep -qxF "$gitignore_pattern" ".gitignore"
-  assert_success ".gitignore should contain directory pattern '$gitignore_pattern'"
+  assert_success ".gitignore should contain directory path '$gitignore_pattern'"
 
-  # Verify git status
+  # Verify git status shows changes (archive, paths.list, .gitignore)
+  echo "DEBUG core.bats: Running git status --porcelain"
   run git status --porcelain
+  echo "Git status: $output"
   assert_output --partial "A  $archive_file"
-  assert_output --partial "M  .gitignore"
+  assert_output --partial "M  .git-vault/paths.list" # Manifest is modified
+  assert_output --partial "M  .gitignore" # Gitignore is modified
 }
 
 @test "[Core] First commit after add succeeds" {

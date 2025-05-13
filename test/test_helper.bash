@@ -98,14 +98,16 @@ install_git_vault() {
   cp "$PROJECT_ROOT/encrypt.sh" "$TEST_REPO/temp_scripts/"
   cp "$PROJECT_ROOT/decrypt.sh" "$TEST_REPO/temp_scripts/"
   cp "$PROJECT_ROOT/install.sh" "$TEST_REPO/temp_scripts/"
+  cp "$PROJECT_ROOT/utils.sh" "$TEST_REPO/temp_scripts/"
 
-  # Create an empty paths.list instead of copying it (since it's now embedded in install.sh)
+  # Create an empty paths.list for testing - restore this line
   touch "$TEST_REPO/temp_scripts/paths.list"
 
   # Run the install script with the --target-dir flag pointing to our test repository
   # This ensures we never modify the main project's files or hooks
   cd "$TEST_REPO" || return 1
-  run bash "$TEST_REPO/temp_scripts/install.sh" --target-dir "$TEST_REPO"
+  # Pipe "n" to the 1Password prompt to default to file-based storage for tests
+  run bash -c "printf 'n\n' | bash \"$TEST_REPO/temp_scripts/install.sh\" --target-dir \"$TEST_REPO\""
   assert_success "install.sh should succeed"
 
   # Verify basic installation results
@@ -172,26 +174,49 @@ add_path() {
   local password="$2"
   local add_script="$TEST_REPO/.git-vault/add.sh"
 
+  # Debug the setup
+  echo "Debug: Adding path '$path_to_add' with password"
+  echo "Debug: Working in directory: $(pwd)"
+  echo "Debug: Test repo: $TEST_REPO"
+  echo "Debug: Checking for add.sh at: $add_script"
+
+  # Make sure add.sh is available
+  if [ ! -f "$add_script" ]; then
+    echo "ERROR: add.sh not found at $add_script" >&2
+    # Check if we can find it elsewhere
+    find "$TEST_REPO" -name "add.sh" -type f >&2
+    return 1
+  fi
+
   # Create content if it doesn't exist
   if [ ! -e "$path_to_add" ]; then
     if [[ "$path_to_add" == */ ]]; then # Check if it ends with / indicating directory
         mkdir -p "$path_to_add"
+        echo "Debug: Created directory $path_to_add"
         echo "content for dir $path_to_add" > "$path_to_add/file.txt"
+        echo "Debug: Added test file in directory"
     else
         mkdir -p "$(dirname "$path_to_add")"
+        echo "Debug: Created parent dir for $path_to_add"
         echo "content for $path_to_add" > "$path_to_add"
+        echo "Debug: Created file $path_to_add"
     fi
   fi
 
   # Ensure storage directory exists with proper structure
   mkdir -p "$TEST_REPO/.git-vault/storage"
-
-  # Don't try to create directories based on archive_name, as it should be dash-separated
-  # The actual add.sh script will correctly create parent directories as needed
+  echo "Debug: Ensured storage directory exists"
 
   # Run add.sh, piping the password twice
-  # Use a subshell or process substitution to handle stdin
   echo "Running add.sh for $path_to_add"
   run bash -c "printf '%s\\n%s\\n' '$password' '$password' | bash '$add_script' '$path_to_add'"
+
+  # If add.sh fails, provide more debugging info
+  if [ "$status" -ne 0 ]; then
+    echo "ERROR: add.sh failed with status $status" >&2
+    echo "Output: $output" >&2
+    return 1
+  fi
+
   assert_success "add.sh should succeed for '$path_to_add'"
 }

@@ -183,6 +183,55 @@ install_dependencies() {
   return $exit_code
 }
 
+# --- 1Password Helper Functions (to be used later in other scripts too) ---
+# These are added here for install-time checks and config.
+# They will be duplicated in other scripts as needed since we are not creating a separate helper file.
+
+# Check if 1Password CLI is available and properly signed in
+check_op_status() {
+  # Check if op command exists
+  if ! command -v op >/dev/null 2>&1; then
+    echo "Error: 1Password CLI 'op' not found. Install it from https://1password.com/downloads/command-line/" >&2
+    return 1
+  fi
+
+  # Check if user is signed in
+  if ! op whoami >/dev/null 2>&1; then
+    echo "Error: Not signed in to 1Password CLI. Sign in with: op signin" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+# Get Git-Vault vault name
+get_vault_name() {
+  local vault_file="$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/1password-vault" # Use absolute path during install
+
+  if [ -f "$vault_file" ]; then
+    cat "$vault_file"
+  else
+    echo "Git-Vault" # Default vault name
+  fi
+}
+
+# Get project name for item naming
+get_project_name() {
+  # Try to get the project name from the repository
+  local project_name
+
+  # First try from the origin remote URL within the target repo
+  project_name=$(git -C "$TARGET_REPO_ROOT" remote get-url origin 2>/dev/null | sed -E 's|^.*/([^/]+)(\\.git)?$|\\1|' || true)
+
+  # If that fails, use the directory name of the target repo
+  if [ -z "$project_name" ]; then
+    project_name=$(basename "$TARGET_REPO_ROOT")
+  fi
+
+  echo "$project_name"
+}
+# --- End 1Password Helper Functions ---
+
 # --- Helper Functions ---
 # Downloads a file from GitHub releases if not found locally
 download_or_use_local() {
@@ -227,6 +276,9 @@ download_or_use_local() {
 # --- Parse Arguments ---
 TARGET_DIR=""
 LFS_THRESHOLD=$DEFAULT_LFS_THRESHOLD
+STORAGE_MODE="file" # Default storage mode
+OP_VAULT_NAME="Git-Vault" # Default 1Password vault name
+USE_1PASSWORD=false
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -t|--target-dir)
@@ -239,14 +291,14 @@ while [ "$#" -gt 0 ]; do
       ;;
     --min-lfs=*)
       LFS_THRESHOLD="${1#*=}"
-      if ! [[ "$LFS_THRESHOLD" =~ ^[0-9]+$ ]]; then
+      if ! echo "$LFS_THRESHOLD" | grep -Eq '^[0-9]+$'; then
         echo "Error: --min-lfs requires a positive integer value in MB" >&2
         exit 1
       fi
       shift
       ;;
     --min-lfs)
-      if [ -z "$2" ] || ! [[ "$2" =~ ^[0-9]+$ ]]; then
+      if [ -z "$2" ] || ! echo "$2" | grep -Eq '^[0-9]+$'; then
         echo "Error: $1 requires a positive integer value in MB" >&2
         exit 1
       fi
@@ -276,19 +328,23 @@ if [ -n "$missing_deps" ]; then
     exit 1
   fi
 
-  read -p "Would you like to install the missing dependencies? [y/N] " -n 1 -r
+  printf "Would you like to install the missing dependencies? [y/N] "
+  read -r REPLY
   echo
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
-    if ! install_dependencies "$platform" "$missing_deps"; then
-      echo "Error: Failed to install dependencies. Please install them manually:$missing_deps"
+    case "$REPLY" in
+    [Yy]*)
+      if ! install_dependencies "$platform" "$missing_deps"; then
+        echo "Error: Failed to install dependencies. Please install them manually:$missing_deps"
+        exit 1
+      fi
+      echo "Dependencies installed successfully."
+      ;;
+    *)
+      echo "Dependencies are required for git-vault to function properly."
+      echo "Please install them manually:$missing_deps"
       exit 1
-    fi
-    echo "Dependencies installed successfully."
-  else
-    echo "Dependencies are required for git-vault to function properly."
-    echo "Please install them manually:$missing_deps"
-    exit 1
-  fi
+      ;;
+  esac
 fi
 
 # --- Main Installation Logic ---
@@ -348,6 +404,52 @@ SOURCE_SCRIPT_DIR=$(dirname "$0") # Assumes install.sh location
 echo "Ensuring required directories and files exist in target repo..."
 mkdir -p "$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR" "$TARGET_REPO_ROOT/$STORAGE_DIR" "$HOOKS_DIR"
 
+# --- 1Password Configuration ---
+echo "Checking for 1Password CLI..."
+if command -v op >/dev/null 2>&1; then
+  echo "1Password CLI 'op' detected."
+  printf "Would you like to use 1Password for password storage instead of local files? [y/N]: "
+  read -r use_1password_response || true # Add || true to handle potential read errors
+  echo # Add newline after read
+
+  if [ "$use_1password_response" = "y" ] || [ "$use_1password_response" = "Y" ]; then
+    echo "Checking 1Password sign-in status..."
+    if ! check_op_status; then
+      echo "Error: Cannot proceed with 1Password setup due to sign-in issues." >&2
+      echo "Please sign in using 'op signin' and run the installation again." >&2
+      exit 1
+    fi
+    echo "Sign-in status verified."
+    USE_1PASSWORD=true
+    STORAGE_MODE="1password"
+
+    # Ask for vault name
+    current_project_name=$(basename "$TARGET_REPO_ROOT") # Simple basename during install
+    printf "Enter the 1Password vault name for project '%s' secrets (leave blank for '%s'): " "$current_project_name" "$OP_VAULT_NAME"
+    read -r user_vault_name || true
+    echo # Add newline after read
+
+    if [ -n "$user_vault_name" ]; then
+      OP_VAULT_NAME="$user_vault_name"
+    fi
+    echo "Using 1Password vault: '$OP_VAULT_NAME'"
+
+    # Save vault name configuration
+    echo "$OP_VAULT_NAME" > "$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/1password-vault"
+    echo "1Password vault name saved to '$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/1password-vault'"
+  else
+    echo "Using file-based password storage."
+    STORAGE_MODE="file"
+  fi
+else
+  echo "1Password CLI 'op' not detected. Using default file-based password storage."
+  STORAGE_MODE="file"
+fi
+
+# Save storage mode configuration
+echo "$STORAGE_MODE" > "$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/storage-mode"
+echo "Storage mode ('$STORAGE_MODE') saved to '$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/storage-mode'"
+
 # --- Install Script Files ---
 echo "Installing git-vault scripts into target '$TARGET_GIT_VAULT_DIR/'..."
 
@@ -358,7 +460,8 @@ if [ ! -f "$TARGET_REPO_ROOT/$TARGET_MANIFEST" ]; then
 fi
 
 # Install script files, either from local copies or GitHub release
-SCRIPT_FILES="add.sh remove.sh encrypt.sh decrypt.sh"
+# Include utils.sh now
+SCRIPT_FILES="add.sh remove.sh encrypt.sh decrypt.sh utils.sh"
 for script in $SCRIPT_FILES; do
   # Try local file first, then download from GitHub if needed
   if ! download_or_use_local "$script" "$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/$script" "$SOURCE_SCRIPT_DIR"; then
@@ -373,6 +476,7 @@ done
 echo "Updating .gitignore..."
 GITIGNORE_FILE="$TARGET_REPO_ROOT/.gitignore"
 PW_IGNORE_PATTERN="$TARGET_GIT_VAULT_DIR_REL/*.pw"
+PW_1P_IGNORE_PATTERN="$TARGET_GIT_VAULT_DIR_REL/*.pw.1p" # Ignore 1Password marker files
 # Add .gitignore if it doesn't exist
 touch "$GITIGNORE_FILE"
 
@@ -380,6 +484,12 @@ touch "$GITIGNORE_FILE"
 if ! grep -qxF "$PW_IGNORE_PATTERN" "$GITIGNORE_FILE"; then
     echo "Adding '$PW_IGNORE_PATTERN' to $GITIGNORE_FILE"
     printf "\n# Git-Vault password files (DO NOT COMMIT)\n%s\n" "$PW_IGNORE_PATTERN" >> "$GITIGNORE_FILE"
+fi
+
+# Add 1Password marker file ignore pattern if not present and using 1password mode
+if [ "$STORAGE_MODE" = "1password" ] && ! grep -qxF "$PW_1P_IGNORE_PATTERN" "$GITIGNORE_FILE"; then
+    echo "Adding '$PW_1P_IGNORE_PATTERN' to $GITIGNORE_FILE"
+    printf "# Git-Vault 1Password marker files (DO NOT COMMIT)\n%s\n" "$PW_1P_IGNORE_PATTERN" >> "$GITIGNORE_FILE"
 fi
 
 # Ensure storage/ directory is properly tracked
@@ -510,6 +620,10 @@ echo "Hook installation complete."
 # --- Print Usage Instructions ---
 echo ""
 echo "Git-Vault installation complete."
+echo "Storage mode set to: $STORAGE_MODE"
+if [ "$STORAGE_MODE" = "1password" ]; then
+  echo "Using 1Password vault: '$OP_VAULT_NAME'"
+fi
 echo "Usage:"
 echo "  Add a path:    $TARGET_GIT_VAULT_DIR_REL/add.sh <relative-path-to-file-or-dir>"
 echo "  Remove a path: $TARGET_GIT_VAULT_DIR_REL/remove.sh <relative-path-to-file-or-dir>"
