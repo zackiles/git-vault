@@ -98,6 +98,8 @@ EOF
 #!/bin/sh
 check_dependency() {
   command -v "\$1" >/dev/null 2>&1
+  # Return 1 for consistency in test results, regardless of the actual error code
+  [ \$? -eq 0 ] || return 1
 }
 check_dependency nonexistent_command
 echo \$?
