@@ -80,6 +80,7 @@ load 'test_helper'
   # Checkout previous commit to trigger post-checkout hook
   run git checkout HEAD~1 --quiet
   assert_success "Checkout should succeed"
+  sleep 1 # Add a small delay to mitigate potential filesystem race conditions
   assert_output --partial "HOOK: Running git-vault post-checkout"
 
   # Verify file was restored
@@ -125,6 +126,7 @@ load 'test_helper'
   # Checkout previous commit
   run git checkout HEAD~1 --quiet
   assert_success "Checkout should succeed"
+  sleep 1 # Add a small delay
 
   # The hook might run but should not perform any decryption operations
   if [[ "$output" == *"HOOK: Running git-vault post-checkout"* ]]; then

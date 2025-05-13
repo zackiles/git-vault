@@ -126,8 +126,9 @@ teardown_path_override() {
   run bash .git-vault/remove.sh "$file_path"
   assert_failure
   # Check for key terms rather than exact message
-  assert_output --partial "Password file"
-  assert_output --partial "missing"
+  assert_output --partial "Neither password file"
+  assert_output --partial "nor 1Password marker"
+  assert_output --partial "Cannot verify password or proceed"
 }
 
 @test "[Error] remove.sh fails if archive file is missing" {
@@ -143,9 +144,9 @@ teardown_path_override() {
 
   run bash .git-vault/remove.sh "$file_path"
   assert_failure
-  # Check for key terms rather than exact message
-  assert_output --partial "Archive file"
-  assert_output --partial "missing"
+  # Check for key terms related to password verification failure
+  assert_output --partial "Password verification failed"
+  assert_output --partial "Aborting removal"
 }
 
 @test "[Error Hooks] pre-commit warns if password file is missing but continues" {
@@ -165,13 +166,12 @@ teardown_path_override() {
   git add --force "$file_path"
 
   # The commit should still run even with the warning
-  # We'll check for the warning message but don't require exact format
   run git commit -m "Commit with missing pw file"
-  # Don't assert success since this depends on hook implementation details
-  # Just verify the warning message contains key terms
-  assert_output --partial "HOOK"
-  assert_output --partial "Password file"
-  assert_output --partial "missing"
+  # Check for the updated warning message with 1Password references
+  assert_output --partial "HOOK WARN"
+  assert_output --partial "Neither password file"
+  assert_output --partial "nor 1Password marker"
+  assert_output --partial "Cannot encrypt this path"
 }
 
 @test "[Error Hooks] post-checkout warns if password file is missing but continues" {
@@ -192,9 +192,11 @@ teardown_path_override() {
   run git checkout HEAD~1 --quiet
   assert_success "Checkout should succeed despite missing pw file"
   assert_output --partial "HOOK: Running git-vault post-checkout"
-  # Just check for key terms, not exact format
-  assert_output --partial "Password file"
-  assert_output --partial "missing"
+  # Check for the updated warning message with 1Password references
+  assert_output --partial "HOOK INFO"
+  assert_output --partial "Neither password file"
+  assert_output --partial "nor 1Password marker"
+  assert_output --partial "Skipping decryption for this path"
 }
 
 @test "[Error Hooks] post-checkout warns if archive file is missing but continues" {

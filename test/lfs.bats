@@ -36,7 +36,7 @@ generate_large_file() {
   mkdir -p "$(dirname "$file_path")"
 
   # Create a file of the given size using dd
-  if [[ "$(uname)" == "Darwin" ]]; then
+  if [ "$(uname)" = "Darwin" ]; then
     # macOS
     dd if=/dev/zero of="$file_path" bs=1m count="$size_in_mb" 2>/dev/null
   else
@@ -72,9 +72,11 @@ skip_if_no_lfs() {
   cp "$PROJECT_ROOT/encrypt.sh" "$TEST_REPO/temp_scripts/"
   cp "$PROJECT_ROOT/decrypt.sh" "$TEST_REPO/temp_scripts/"
   cp "$PROJECT_ROOT/install.sh" "$TEST_REPO/temp_scripts/"
+  cp "$PROJECT_ROOT/utils.sh" "$TEST_REPO/temp_scripts/" # Add utils.sh for this test as well
 
   cd "$TEST_REPO" || return 1
-  run bash "$TEST_REPO/temp_scripts/install.sh" --target-dir "$TEST_REPO" --min-lfs="$custom_threshold"
+  # Pipe "n" to avoid 1Password prompt
+  run bash -c "printf 'n\\n' | $TEST_REPO/temp_scripts/install.sh --target-dir $TEST_REPO --min-lfs=$custom_threshold"
   assert_success "install.sh should succeed with custom LFS threshold"
 
   # Check if lfs-config exists and contains custom value
@@ -162,12 +164,18 @@ skip_if_no_lfs() {
 }
 
 @test "[LFS] add.sh handles missing LFS by falling back to normal Git" {
-  # Skip this test if we can't modify the add.sh file
-  if [ ! -f ".git-vault/add.sh" ]; then
-    skip "Could not find add.sh file to test fallback behavior"
-  fi
-
+  # Call install_git_vault FIRST to ensure the scripts are in place
   install_git_vault
+
+  # Skip this test if we can't modify the add.sh file
+  # Check the path relative to $TEST_REPO
+  local add_script_in_repo="$TEST_REPO/.git-vault/add.sh"
+  if [ ! -f "$add_script_in_repo" ]; then
+    echo "DEBUG: Looking for add.sh at $add_script_in_repo" >&2
+    # Optional: list contents for debugging
+    ls -la "$TEST_REPO/.git-vault/" >&2
+    skip "Could not find add.sh file ('$add_script_in_repo') to test fallback behavior"
+  fi
 
   # Set a small LFS threshold for testing
   echo "1" > ".git-vault/lfs-config"
@@ -176,23 +184,36 @@ skip_if_no_lfs() {
   local file_path="large_fallback.bin"
   generate_large_file "$file_path" 2
 
-  # Instead of modifying PATH, let's modify the add.sh script directly
   # This is more reliable and safer for testing
-  local add_script=".git-vault/add.sh"
+  local add_script=".git-vault/add.sh" # Relative path is fine here as we are cd'd into $TEST_REPO
   local add_script_bak="${add_script}.bak"
 
   # Backup the original add.sh
   cp "$add_script" "$add_script_bak"
+  echo "DEBUG lfs.bats: Backed up $add_script to $add_script_bak"
 
   # Modify add.sh to simulate git-lfs not being available
   # We need to replace the "command -v git-lfs" check to always return false
-  sed -i.sedtmp 's/command -v git-lfs/echo "Simulating LFS not available" >\&2 \&\& false # command -v git-lfs/g' "$add_script"
+  echo "DEBUG lfs.bats: Modifying $add_script to simulate missing git-lfs..."
+  echo "DEBUG lfs.bats: Content before sed:"
+  grep 'command -v git-lfs' "$add_script" >&2 || echo " -- pattern not found before sed --" >&2
+
+  # Use a different delimiter (|) and a simpler replacement approach
+  # Just add the word 'false_' before 'command' to make it not find the command
+  sed -i.sedtmp 's|command -v git-lfs|false_command -v git-lfs|g' "$add_script"
+
   rm -f "${add_script}.sedtmp"  # Remove temporary sed file
+  echo "DEBUG lfs.bats: Content after sed:"
+  grep 'false_command -v git-lfs' "$add_script" >&2 || echo " -- pattern not successfully replaced --" >&2
 
   # Now run add.sh which should fall back to normal Git
-  run bash -c "printf 'password123\npassword123\n' | $add_script '$file_path'"
+  # Correct quoting for printf and pipes within bash -c
+  local run_command="printf '%s\\n%s\\n' 'password123' 'password123' | bash '$add_script' '$file_path'"
+  echo "DEBUG lfs.bats: Running command: bash -c '$run_command'"
+  run bash -c "$run_command"
 
   # Restore the original add.sh
+  echo "DEBUG lfs.bats: Restoring original $add_script from $add_script_bak"
   mv "$add_script_bak" "$add_script"
 
   # Check that the command succeeded

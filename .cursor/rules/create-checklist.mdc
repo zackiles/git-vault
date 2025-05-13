@@ -48,6 +48,7 @@ Swap `axios` from `old-codebase` with Deno-native `fetch` in `new-codebase` to r
 - Steps are specific, technical, and concise
 - Steps are numbered in order of when they should be implemented within their given phase
 - Steps include checkboxes
+- **IMPORTANT**: For large or complicated phases, encourage the reader to run the tests one they're finished implementing that phase before they move on to the next phase. Leave a note in the phase's description warning them to so it draws the readers attention.
 
 ## Summary
 

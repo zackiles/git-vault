@@ -1,0 +1,7 @@
+---
+description: Follow after fixing a repeat bug or issue
+globs:
+alwaysApply: false
+---
+# Follow After Fixing or Solving A Repeat Bug Or Issue
+This project uses shell scrips cross platform which are brittle and can be difficult to implement. If you discover an interesting quirk, such as a hard to fix failing test, add your discovered quirk and the thing you learned to solve it so other engineers don't make the same mistake.

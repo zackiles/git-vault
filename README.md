@@ -3,23 +3,20 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Release](https://github.com/zackiles/git-vault/actions/workflows/release.yml/badge.svg)](https://github.com/zackiles/git-vault/actions/workflows/release.yml)
 
-Drop-dead-simple tool for storing sensitive files or folders in git. Git hooks and GPG transparently encrypt and decrypt resources within your repository, keeping them encrypted remotely but available locally. Works on all **platforms**, **dummy-proof**, and **secure**!
+Drop-dead-simple tool for storing sensitive files or folders in git. Git hooks and GPG transparently encrypt and decrypt resources within your repository, keeping them encrypted remotely but available locally. Works on all **platforms**, **dummy-proof**, and **secure**! Optionally supports and configures Git LFS, 1Password, and more automatically.
 
 ## Why Git-Vault?
 
-There's never been a quick, simple, consistent, and git-native way to secure files or folders securely within a repo. These options tend to suck:
+There's never been a quick, simple, consistent, and git-native way to secure files or folders securely within a repo.
 
-* ***Private registry for resources?**:
+**Private registry for resources?**<br>
+Cons: _Effort, cost, and either everyone gets access or they don't (e.g NPM org)._
 
-* 👎 Effort, cost, and either everyone gets access or they don't (e.g NPM org).
+**Bespoke pipelines to fetch resources?**<br>
+Cons: _Effort, cost, consistency, and way too big of a hammer for most situations._
 
-* **Bespoke pipelines to fetch resources?**:
-
-* 👎 Effort, cost, consistency, and way too big of a hammer for most situations.
-
-* **Everything else?**:
-
-* 👎 Native git hooks, cross-platform, 3rd party dependencies, complicated, sketchy code...The closest project to this one is [git-crypt]([git-crypt](https://github.com/AGWA/git-crypt)) which is great, but takes a bit too much manual work and the project is no-longer actively maintained.
+**Everything else?**<br>
+Cons: _No native git hooks, cross-platform, 3rd party dependencies, complicated, sketchy code...The closest project to this one is [git-crypt]([git-crypt](https://github.com/AGWA/git-crypt)) which is great, but takes a bit too much manual work, doesn't support 1Password, and the project is no-longer actively maintained._
 
 > [!TIP]
 > Checkout some examples of [When To Use It](#when-to-use-it).
@@ -47,11 +44,19 @@ This script performs the following setup:
 *   Installs Git hooks (`pre-commit`, `post-checkout`, `post-merge`) into your repository's hooks directory (e.g., `.git/hooks/` or a custom path) to automate encryption and decryption.
 *   Updates your root `.gitignore` file to ensure password files (`.git-vault/*.pw`) are not committed.
 *   Configures Git LFS for large archives if Git LFS is available (see [Git LFS Integration](#git-lfs-integration) below).
+*   Allows choosing between traditional file-based password storage or integration with [1Password CLI](#1password-integration) for password management.
 
 > [!NOTE]
 > Git-Vault has automatic dependency detection and installation. If any required dependencies are missing, the script will offer to install them automatically for you based on your operating system. Supported platforms include Linux (Debian/Ubuntu, Fedora, Arch), macOS, and Windows (Git Bash/MinGW).
 
 ## Usage
+
+**Choose Password Storage (During Installation):**
+
+When you run `install.sh`, you will be prompted if you want to use 1Password CLI (`op`) for managing the encryption passwords, provided `op` is detected on your system. 
+
+*   **File-based (Default):** If you choose No, or if `op` is not detected, git-vault works as before, storing passwords in individual `.git-vault/*.pw` files (which are gitignored).
+*   **1Password Integration:** If you choose Yes, passwords for vaulted items will be stored securely in your 1Password vault instead of local files. See [1Password Integration](#1password-integration) below.
 
 **Add a file/directory to the vault:**
   ```bash
@@ -71,6 +76,7 @@ This script performs the following setup:
 
 *   **Encryption (`pre-commit` hook):** Before you commit, `.git-vault/encrypt.sh` automatically re-encrypts any tracked plaintext files listed in `paths.list` into their corresponding archives in `.git-vault/storage/`. Only the encrypted archive is staged.
 *   **Decryption (`post-checkout`, `post-merge` hooks):** After checking out a branch or merging, `.git-vault/decrypt.sh` automatically decrypts the archives found in `.git-vault/storage/` back to their original plaintext locations, using the corresponding `.pw` files.
+*   **Password Handling:** Passwords are read either from the `.git-vault/*.pw` files or fetched from 1Password via the `op` CLI, depending on the mode selected during installation.
 
 ## Git LFS Integration
 
@@ -97,6 +103,39 @@ Git-Vault now integrates with Git LFS to efficiently manage large encrypted arch
 - If Git LFS is not available, git-vault will still function but will store large files directly in Git
 - When LFS is available, git-vault will automatically set up `.gitattributes` and configure LFS tracking
 - Archives exceeding the size threshold will be tracked with LFS, while smaller ones will use regular Git tracking
+
+## 1Password Integration
+
+Git-Vault can optionally use the 1Password CLI (`op`) to manage encryption passwords instead of storing them in local `.pw` files.
+
+**Requirements:**
+
+*   [1Password CLI (`op`)](https://1password.com/downloads/command-line/) must be installed and configured on your system.
+*   You must be signed in to your 1Password account via the CLI (`op signin`).
+
+**How it Works:**
+
+1.  **Installation:** During `install.sh`, if `op` is detected, you'll be asked if you want to use it. If you choose Yes:
+    *   You can specify a 1Password vault name (defaults to "Git-Vault").
+    *   Configuration is stored in `.git-vault/storage-mode` and `.git-vault/1password-vault`.
+2.  **Adding Files (`add.sh`):** When you add a file/directory:
+    *   Instead of saving to a `.pw` file, `add.sh` creates a new Secure Note item in your designated 1Password vault.
+    *   The item title follows the pattern `git-vault-<project>-<hash>`.
+    *   The item contains fields for the `password`, the original `path`, and a `status` (initially "active").
+    *   An empty marker file (`.git-vault/git-vault-<hash>.pw.1p`) is created locally to indicate this path uses 1Password.
+3.  **Encryption/Decryption (Hooks):**
+    *   The hooks check for the `.pw.1p` marker file.
+    *   If present, the hooks use `op item get` to securely retrieve the password from the corresponding 1Password item and use it for `gpg` operations.
+    *   If the marker is not present, the hooks fall back to using the local `.pw` file.
+4.  **Removing Files (`remove.sh`):**
+    *   Verifies the password by retrieving it from 1Password.
+    *   Updates the `status` field in the corresponding 1Password item to "removed" (the item is not deleted).
+    *   Removes the local `.pw.1p` marker file.
+
+**Usage Notes:**
+
+*   Ensure `op` is installed and you are signed in before running git operations (commit, checkout, merge) if you are using 1Password mode.
+*   The integration relies on specific item naming and field conventions within 1Password.
 
 ## When To Use It
 

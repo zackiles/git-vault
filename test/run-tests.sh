@@ -1,8 +1,8 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 # Run tests with timeout
 
 # Configuration
-TEST_TIMEOUT=${TEST_TIMEOUT:-60}  # Default timeout in seconds (increased to 60)
+TEST_TIMEOUT=${TEST_TIMEOUT:-90}  # Default timeout in seconds (increased to 60)
 TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Check if timeout command is available

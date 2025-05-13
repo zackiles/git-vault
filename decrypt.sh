@@ -12,15 +12,109 @@ command -v mkdir >/dev/null 2>&1 || { echo >&2 "HOOK ERROR (git-vault decrypt): 
 command -v rm >/dev/null 2>&1 || { echo >&2 "HOOK ERROR (git-vault decrypt): rm command not found! Decryption skipped."; exit 0; }
 # --- End Dependency Checks ---
 
+# --- 1Password Helper Functions ---
+# Duplicated from install.sh as needed.
+
+# Check if 1Password CLI is available and properly signed in
+check_op_status() {
+  # Check if op command exists
+  if ! command -v op >/dev/null 2>&1; then
+    echo "Error: 1Password CLI 'op' not found. Install it from https://1password.com/downloads/command-line/" >&2
+    return 1
+  fi
+
+  # Check if user is signed in
+  if ! op whoami >/dev/null 2>&1; then
+    echo "Error: Not signed in to 1Password CLI. Sign in with: op signin" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+# Get Git-Vault vault name (reads from config file)
+get_vault_name() {
+  local vault_file=".git-vault/1password-vault"
+
+  if [ -f "$vault_file" ]; then
+    cat "$vault_file"
+  else
+    echo "Git-Vault" # Default vault name
+  fi
+}
+
+# Get project name for item naming (relative to current repo)
+get_project_name() {
+  local project_name
+  project_name=$(git remote get-url origin 2>/dev/null | sed -E 's|^.*/([^/]+)(\\.git)?$|\\1|' || true)
+  if [ -z "$project_name" ]; then
+    project_name=$(basename "$(git rev-parse --show-toplevel)")
+  fi
+  echo "$project_name"
+}
+
+# Get password from 1Password
+get_op_password() {
+  local hash="$1"
+  local vault_name
+  local project_name
+  local item_name
+
+  vault_name=$(get_vault_name)
+  project_name=$(get_project_name)
+  item_name="git-vault-${project_name}-${hash}"
+
+  # Get password field from the item
+  local password
+  password=$(op item get "$item_name" --vault "$vault_name" --fields password 2>/dev/null)
+  local op_exit_code=$?
+
+  if [ $op_exit_code -ne 0 ] || [ -z "$password" ]; then
+    echo "HOOK Error (git-vault decrypt): Failed to retrieve password from 1Password item '$item_name' in vault '$vault_name'." >&2
+    echo "       Check item name, vault name, permissions, and sign-in status." >&2
+    return 1 # Indicate failure
+  fi
+
+  echo "$password"
+  return 0 # Indicate success
+}
+# --- End 1Password Helper Functions ---
+
+# --- Get Script Directory (relative to .git or repo root) & Source Utils ---
+# Hooks can run from .git/hooks or a custom hooks dir. We need to find .git-vault from there.
+
+# Heuristic to find GIT_VAULT_DIR from hook
+# This assumes .git-vault is at the repo root.
+if [ -d ".git-vault" ]; then # Likely running from repo root (e.g. custom hook path set to root)
+    GIT_VAULT_DIR_HOOKS=".git-vault"
+elif [ -d "../../.git-vault" ]; then # Likely running from .git/hooks
+    GIT_VAULT_DIR_HOOKS="../../.git-vault"
+elif [ -d "../.git-vault" ]; then # Could be another custom hook depth
+    GIT_VAULT_DIR_HOOKS="../.git-vault"
+else
+    echo "HOOK ERROR (git-vault decrypt): Could not locate .git-vault directory from hook execution path." >&2
+    exit 0 # Don't block hook chain for utils path issue
+fi
+
+UTILS_PATH_HOOKS="$GIT_VAULT_DIR_HOOKS/utils.sh"
+if [ -f "$UTILS_PATH_HOOKS" ]; then
+  # shellcheck source=utils.sh
+  . "$UTILS_PATH_HOOKS"
+else
+  echo "HOOK ERROR (git-vault decrypt): Utility script '$UTILS_PATH_HOOKS' not found. Skipping decryption." >&2
+  exit 0 # Don't block hook chain
+fi
+# --- End Sourcing ---
+
 # --- Environment Setup ---
 # Hooks run from the .git directory or repo root depending on Git version.
 # Robustly find the repo root.
 REPO=$(git rev-parse --show-toplevel) || { echo "HOOK ERROR (git-vault decrypt): Could not determine repository root."; exit 0; } # Don't block hook chain
 cd "$REPO" || { echo "HOOK ERROR (git-vault decrypt): Could not change to repository root '$REPO'."; exit 0; }
 
-GIT_VAULT_DIR=".git-vault"
-MANIFEST="$GIT_VAULT_DIR/paths.list"
-STORAGE_DIR="$GIT_VAULT_DIR/storage"
+GIT_VAULT_DIR_CONFIG=".git-vault" # For functions like get_vault_name that expect path from repo root
+MANIFEST="$GIT_VAULT_DIR_CONFIG/paths.list"
+STORAGE_DIR="$GIT_VAULT_DIR_CONFIG/storage"
 
 # --- Check if Manifest Exists ---
 if [ ! -f "$MANIFEST" ]; then
@@ -46,21 +140,40 @@ while IFS=' ' read -r HASH PATH_IN REST || [ -n "$HASH" ]; do # Process even if 
       continue
   fi
 
-  PWFILE="$GIT_VAULT_DIR/git-vault-$HASH.pw"
+  PWFILE="$GIT_VAULT_DIR_CONFIG/git-vault-$HASH.pw"
+  PWFILE_1P="${PWFILE}.1p" # Marker file for 1Password mode
   # Use tr for consistent slash-to-dash conversion (matching add.sh)
   ARCHIVE_NAME=$(echo "$PATH_IN" | tr '/' '-')
   ARCHIVE="$STORAGE_DIR/$ARCHIVE_NAME.tar.gz.gpg"
   TARGET_PATH="$REPO/$PATH_IN"
 
-  # --- Pre-decryption Checks ---
-  # 1. Check if password file exists
-  if [ ! -f "$PWFILE" ]; then
-    echo "HOOK INFO (git-vault decrypt): Password file '$PWFILE' for '$PATH_IN' (hash $HASH) missing. Skipping decryption for this path." >&2
-    # This is expected if the user hasn't set up the password on this machine.
+  # --- Determine Mode and Check Password Availability ---
+  PASSWORD=""
+  USE_1PASSWORD=false
+  if [ -f "$PWFILE_1P" ]; then
+    USE_1PASSWORD=true
+    # Check 1P status
+    if ! check_op_status; then
+        echo "HOOK INFO (git-vault decrypt): 1Password CLI issues detected for '$PATH_IN' (hash $HASH). Skipping decryption." >&2
+        continue # Skip this entry
+    fi
+    # Get password from 1Password
+    PASSWORD=$(get_op_password "$HASH" "$GIT_VAULT_DIR_CONFIG")
+    if [ $? -ne 0 ] || [ -z "$PASSWORD" ]; then
+        echo "HOOK INFO (git-vault decrypt): Failed to retrieve password from 1Password for '$PATH_IN' (hash $HASH). Skipping decryption." >&2
+        continue # Skip this entry
+    fi
+  elif [ -f "$PWFILE" ]; then
+    # File mode - password file exists
+    : # No action needed here
+  else
+    # Neither marker nor password file exists
+    echo "HOOK INFO (git-vault decrypt): Neither password file ('$PWFILE') nor 1Password marker ('$PWFILE_1P') found for '$PATH_IN' (hash $HASH). Skipping decryption for this path." >&2
     continue # Skip this entry
   fi
 
-  # 2. Check if the archive file exists
+  # --- Pre-decryption Checks ---
+  # 1. Check if the archive file exists
   if [ ! -f "$ARCHIVE" ]; then
     echo "HOOK INFO (git-vault decrypt): Archive file '$ARCHIVE' for '$PATH_IN' (hash $HASH) missing. Skipping decryption for this path." >&2
     # This can happen legitimately if the vault was just added but not committed/pulled yet,
@@ -91,13 +204,25 @@ while IFS=' ' read -r HASH PATH_IN REST || [ -n "$HASH" ]; do # Process even if 
   echo "HOOK: Decrypting '$ARCHIVE' -> '$PATH_IN' (hash: $HASH)"
   # Decrypt and extract. Use --yes for batch mode.
   # Extract relative to the REPO root (-C "$REPO").
-  if ! gpg --batch --yes --passphrase-file "$PWFILE" -d "$ARCHIVE" | tar xzf - -C "$REPO"; then
-    echo "HOOK ERROR (git-vault decrypt): Decryption or extraction failed for '$PATH_IN' (hash: $HASH)." >&2
-    echo "       Check the password in '$PWFILE', the archive integrity ('$ARCHIVE'), and permissions." >&2
-    # Don't abort the entire hook chain, as other decryptions might succeed.
-    # The target path might be missing or incomplete after a failure.
-  else
-      HAS_DECRYPTED_ANYTHING=1 # Mark that we successfully decrypted something
+  # Pipe password for 1P mode, use file for file mode
+  if $USE_1PASSWORD; then
+    if ! echo "$PASSWORD" | gpg --batch --yes --passphrase-fd 0 -d "$ARCHIVE" | tar xzf - -C "$REPO"; then
+      echo "HOOK ERROR (git-vault decrypt): Decryption or extraction failed for '$PATH_IN' (hash: $HASH) using 1Password." >&2
+      echo "       Check 1Password credential, archive integrity ('$ARCHIVE'), and permissions." >&2
+      # Don't abort the entire hook chain, as other decryptions might succeed.
+      # The target path might be missing or incomplete after a failure.
+    else
+        HAS_DECRYPTED_ANYTHING=1 # Mark that we successfully decrypted something
+    fi
+  else # File mode
+    if ! gpg --batch --yes --passphrase-file "$PWFILE" -d "$ARCHIVE" | tar xzf - -C "$REPO"; then
+      echo "HOOK ERROR (git-vault decrypt): Decryption or extraction failed for '$PATH_IN' (hash: $HASH) using file '$PWFILE'." >&2
+      echo "       Check the password in '$PWFILE', the archive integrity ('$ARCHIVE'), and permissions." >&2
+      # Don't abort the entire hook chain, as other decryptions might succeed.
+      # The target path might be missing or incomplete after a failure.
+    else
+        HAS_DECRYPTED_ANYTHING=1 # Mark that we successfully decrypted something
+    fi
   fi
 
 done < "$MANIFEST"

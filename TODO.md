@@ -14,19 +14,20 @@ Before marking a TODO done, run all tests. If they pass, mark it and the impleme
 - `remove.sh` should remove the password from 1Password in a way similar to how file-based does, where it "marks" it removed instead of fully deleting it in case a user makes a mistake (we don't want them losing an unrecoverable decryption key)
 - Update all and tests/docs to reflect the new design. Ensure we mock 1Password's CLI interactions as best we can and doing so ONLY after doing deep research on their documentation and understanding of how it works cross-platform.
 
-### 2 ) Optionally Install Dependencies for Users
-
-- **Objective**: Make the `install.sh` script intelligently handle installing the dependencies on the users specific platform (windows, macos, linux) if they aren't available, and if the user chooses to.
-- The following is noted in the user-facing README.md "You need gpg, tar, sha1sum (or shasum), and mktemp installed and available in your PATH.". We'll check for those and any others that are needed when the script first starts and ask the user if they'd like us to install them ourselves.
-- Use most typical and best practice ways to install them on the given system
-- Only prompt and install for the 1 or more that are needed specifically
-- If one or more fails, exit while providing the reason it failed and returning the actual error message from the system
-- Architect in such a way that its easy for maintainers of this project to modify which dependencies will be auto-installed and their specific install method
-- Update all and tests/docs to reflect the new design.
-
-### 3 ) Support Symmetric Keys
+### 2 ) Support Symmetric Keys
 
 Investigate supporting Symmetric Keys for Git-Vault. Borrow inspiration from the open source project [git-crypt]([git-crypt](https://github.com/AGWA/git-crypt)) by reviewing its documentation and code. git-crypt currently supports Symmetric Keys. Generate a TODO that documents the objective and what is needed to get feature parity with git-crypt in its usage of Symmetric Keys for encrypting and decrypting files. This TODO is to create another TODO.
+
+### 3 ) Field Encryption For JSON and YAML
+If the `add` command detects a JSON or YAML file it will prompt a user to ask if they want to encrypt just the values of all fields in the file when storing it in the vault, or do a full file encryption.
+
+### 4 ) Put`.pw` files in the `.git-vault` folder
+
+This will tidy up the end-users project by not cluttering the root of their repository with .pw files
+
+### 5 ) Rename Install to Init
+
+For the user and within this codebase, completely change terminology from 'init' to 'install'. Examples: the 'install.sh' script becomes 'init.sh', the code comments and methods become 'init' instead of 'install', the documentation is updated to reflect this. There should never be the term 'init' as it relates to git-vault anywhere in the codebase. The only time this isn't true is when it comes to specific "install" commands of third parties or terminal commands for things that AREN'T git-vault.
 
 ## Completed TODOs
 
@@ -74,4 +75,14 @@ After a recent change a test started failing that says: (`[Error] add.sh fails i
 - **Objective**: Reduce clutter in the user's project by centralizing all things related to git-vault(except the git hooks) to a single folder.
 - The single folder on the user's project stores: all `.sh` scripts that are installed, `paths.list`, the main `README.md` of git-vault, and a subfolder for storage.
 - Name the folder `.git-vault` and the storage subfolder `.git-vault/storage`.
+- Update all and tests/docs to reflect the new design.
+
+### 2 ) Optionally Install Dependencies for Users
+
+- **Objective**: Make the `install.sh` script intelligently handle installing the dependencies on the users specific platform (windows, macos, linux) if they aren't available, and if the user chooses to.
+- The following is noted in the user-facing README.md "You need gpg, tar, sha1sum (or shasum), and mktemp installed and available in your PATH.". We'll check for those and any others that are needed when the script first starts and ask the user if they'd like us to install them ourselves.
+- Use most typical and best practice ways to install them on the given system
+- Only prompt and install for the 1 or more that are needed specifically
+- If one or more fails, exit while providing the reason it failed and returning the actual error message from the system
+- Architect in such a way that its easy for maintainers of this project to modify which dependencies will be auto-installed and their specific install method
 - Update all and tests/docs to reflect the new design.

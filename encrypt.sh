@@ -10,15 +10,109 @@ command -v tar >/dev/null 2>&1 || { echo >&2 "HOOK ERROR (git-vault encrypt): ta
 command -v git >/dev/null 2>&1 || { echo >&2 "HOOK ERROR (git-vault encrypt): git command not found! Aborting commit."; exit 1; }
 # --- End Dependency Checks ---
 
+# --- 1Password Helper Functions ---
+# Duplicated from install.sh as needed.
+
+# Check if 1Password CLI is available and properly signed in
+check_op_status() {
+  # Check if op command exists
+  if ! command -v op >/dev/null 2>&1; then
+    echo "Error: 1Password CLI 'op' not found. Install it from https://1password.com/downloads/command-line/" >&2
+    return 1
+  fi
+
+  # Check if user is signed in
+  if ! op whoami >/dev/null 2>&1; then
+    echo "Error: Not signed in to 1Password CLI. Sign in with: op signin" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+# Get Git-Vault vault name (reads from config file)
+get_vault_name() {
+  local vault_file=".git-vault/1password-vault"
+
+  if [ -f "$vault_file" ]; then
+    cat "$vault_file"
+  else
+    echo "Git-Vault" # Default vault name
+  fi
+}
+
+# Get project name for item naming (relative to current repo)
+get_project_name() {
+  local project_name
+  project_name=$(git remote get-url origin 2>/dev/null | sed -E 's|^.*/([^/]+)(\\.git)?$|\\1|' || true)
+  if [ -z "$project_name" ]; then
+    project_name=$(basename "$(git rev-parse --show-toplevel)")
+  fi
+  echo "$project_name"
+}
+
+# Get password from 1Password
+get_op_password() {
+  local hash="$1"
+  local vault_name
+  local project_name
+  local item_name
+
+  vault_name=$(get_vault_name)
+  project_name=$(get_project_name)
+  item_name="git-vault-${project_name}-${hash}"
+
+  # Get password field from the item
+  local password
+  password=$(op item get "$item_name" --vault "$vault_name" --fields password 2>/dev/null)
+  local op_exit_code=$?
+
+  if [ $op_exit_code -ne 0 ] || [ -z "$password" ]; then
+    echo "HOOK Error (git-vault encrypt): Failed to retrieve password from 1Password item '$item_name' in vault '$vault_name'." >&2
+    echo "       Check item name, vault name, permissions, and sign-in status." >&2
+    return 1 # Indicate failure
+  fi
+
+  echo "$password"
+  return 0 # Indicate success
+}
+# --- End 1Password Helper Functions ---
+
+# --- Get Script Directory (relative to .git or repo root) & Source Utils ---
+# Hooks can run from .git/hooks or a custom hooks dir. We need to find .git-vault from there.
+
+# Heuristic to find GIT_VAULT_DIR from hook
+# This assumes .git-vault is at the repo root.
+if [ -d ".git-vault" ]; then # Likely running from repo root (e.g. custom hook path set to root)
+    GIT_VAULT_DIR_HOOKS=".git-vault"
+elif [ -d "../../.git-vault" ]; then # Likely running from .git/hooks
+    GIT_VAULT_DIR_HOOKS="../../.git-vault"
+elif [ -d "../.git-vault" ]; then # Could be another custom hook depth
+    GIT_VAULT_DIR_HOOKS="../.git-vault"
+else
+    echo "HOOK ERROR (git-vault encrypt): Could not locate .git-vault directory from hook execution path." >&2
+    exit 1 # Critical to find utils
+fi
+
+UTILS_PATH_HOOKS="$GIT_VAULT_DIR_HOOKS/utils.sh"
+if [ -f "$UTILS_PATH_HOOKS" ]; then
+  # shellcheck source=utils.sh
+  . "$UTILS_PATH_HOOKS"
+else
+  echo "HOOK ERROR (git-vault encrypt): Utility script '$UTILS_PATH_HOOKS' not found." >&2
+  exit 1
+fi
+# --- End Sourcing ---
+
 # --- Environment Setup ---
 # Hooks run from the .git directory or repo root depending on Git version.
 # Robustly find the repo root.
 REPO=$(git rev-parse --show-toplevel) || { echo "HOOK ERROR (git-vault encrypt): Could not determine repository root."; exit 1; }
 cd "$REPO" || { echo "HOOK ERROR (git-vault encrypt): Could not change to repository root '$REPO'."; exit 1; }
 
-GIT_VAULT_DIR=".git-vault"
-MANIFEST="$GIT_VAULT_DIR/paths.list"
-STORAGE_DIR="$GIT_VAULT_DIR/storage"
+GIT_VAULT_DIR_CONFIG=".git-vault" # For functions like get_vault_name that expect path from repo root
+MANIFEST="$GIT_VAULT_DIR_CONFIG/paths.list"
+STORAGE_DIR="$GIT_VAULT_DIR_CONFIG/storage"
 
 # --- Check if Manifest Exists ---
 if [ ! -f "$MANIFEST" ]; then
@@ -44,17 +138,17 @@ while IFS=' ' read -r HASH PATH_IN REST || [ -n "$HASH" ]; do # Process even if 
       continue
   fi
 
-  PWFILE="$GIT_VAULT_DIR/git-vault-$HASH.pw"
+  PWFILE="$GIT_VAULT_DIR_CONFIG/git-vault-$HASH.pw"
+  PWFILE_1P="${PWFILE}.1p" # Marker file for 1Password mode
   # Use tr for consistent slash-to-dash conversion (matching add.sh)
   ARCHIVE_NAME=$(echo "$PATH_IN" | tr '/' '-')
   ARCHIVE="$STORAGE_DIR/$ARCHIVE_NAME.tar.gz.gpg"
 
   # --- Pre-encryption Checks ---
   # 1. Check if password file exists
-  if [ ! -f "$PWFILE" ]; then
-    echo "HOOK WARN (git-vault encrypt): Password file '$PWFILE' for '$PATH_IN' (hash $HASH) missing. Cannot encrypt this path." >&2
-    # This is potentially recoverable if the user adds the pw file, but for a hook, it's safer to warn and maybe fail later.
-    # Consider setting EXIT_CODE=1 here if missing pw should block commit.
+  if [ ! -f "$PWFILE" ] && [ ! -f "$PWFILE_1P" ]; then
+    echo "HOOK WARN (git-vault encrypt): Neither password file ('$PWFILE') nor 1Password marker ('$PWFILE_1P') found for '$PATH_IN' (hash $HASH). Cannot encrypt this path." >&2
+    # EXIT_CODE=1 # Mark failure if this should block commit
     continue # Skip this entry
   fi
 
@@ -76,15 +170,59 @@ while IFS=' ' read -r HASH PATH_IN REST || [ -n "$HASH" ]; do # Process even if 
     continue
   fi
 
+  # --- Determine Mode and Get Password ---
+  PASSWORD=""
+  USE_1PASSWORD=false
+  if [ -f "$PWFILE_1P" ]; then
+    USE_1PASSWORD=true
+    # Check 1P status
+    if ! check_op_status; then
+        echo "HOOK WARN (git-vault encrypt): 1Password CLI issues detected for '$PATH_IN' (hash $HASH). Cannot encrypt." >&2
+        # EXIT_CODE=1 # Mark failure if we want to block commit on OP issues
+        continue # Skip this entry
+    fi
+    # Get password from 1Password
+    PASSWORD=$(get_op_password "$HASH" "$GIT_VAULT_DIR_CONFIG")
+    if [ $? -ne 0 ]; then
+        echo "HOOK ERROR (git-vault encrypt): Failed to retrieve password from 1Password for '$PATH_IN' (hash $HASH). Cannot encrypt." >&2
+        EXIT_CODE=1 # Definitely block commit if password retrieval fails
+        continue # Skip this entry
+    fi
+    if [ -z "$PASSWORD" ]; then # Should be caught by get_op_password, but double check
+        echo "HOOK ERROR (git-vault encrypt): Retrieved empty password from 1Password for '$PATH_IN' (hash $HASH). Cannot encrypt." >&2
+        EXIT_CODE=1
+        continue
+    fi
+  elif [ -f "$PWFILE" ]; then
+    # File mode - password will be read by gpg via --passphrase-file
+    : # No action needed here
+  else
+    # Neither marker nor password file exists
+    echo "HOOK WARN (git-vault encrypt): Neither password file ('$PWFILE') nor 1Password marker ('$PWFILE_1P') found for '$PATH_IN' (hash $HASH). Cannot encrypt this path." >&2
+    # EXIT_CODE=1 # Mark failure if this should block commit
+    continue # Skip this entry
+  fi
+
   # --- Perform Encryption ---
   echo "HOOK: Encrypting '$PATH_IN' -> '$ARCHIVE' (hash: $HASH)"
   # Use -C to ensure paths inside tarball are relative to repo root
   # Use --yes with gpg in batch mode to avoid prompts
-  if ! tar czf - -C "$REPO" "$PATH_IN" | gpg --batch --yes --passphrase-file "$PWFILE" -c -o "$ARCHIVE"; then
-      echo "HOOK ERROR (git-vault encrypt): Encryption failed for '$PATH_IN' (hash: $HASH)." >&2
-      echo "       Check the password in '$PWFILE' and ensure '$PATH_IN' is accessible." >&2
-      EXIT_CODE=1 # Mark failure, commit should be aborted
-      continue # Try next entry if any
+  # Pipe password for 1P mode, use file for file mode
+  if $USE_1PASSWORD; then
+    # Ensure tar output goes to stdout before piping to gpg
+    if ! (tar czf - -C "$REPO" "$PATH_IN" | echo "$PASSWORD" | gpg --batch --yes --passphrase-fd 0 -c -o "$ARCHIVE"); then
+        echo "HOOK ERROR (git-vault encrypt): Encryption failed for '$PATH_IN' (hash: $HASH) using 1Password." >&2
+        echo "       Check 1Password access and ensure '$PATH_IN' is accessible." >&2
+        EXIT_CODE=1 # Mark failure, commit should be aborted
+        continue # Try next entry if any
+    fi
+  else # File mode
+    if ! tar czf - -C "$REPO" "$PATH_IN" | gpg --batch --yes --passphrase-file "$PWFILE" -c -o "$ARCHIVE"; then
+        echo "HOOK ERROR (git-vault encrypt): Encryption failed for '$PATH_IN' (hash: $HASH) using file '$PWFILE'." >&2
+        echo "       Check the password in '$PWFILE' and ensure '$PATH_IN' is accessible." >&2
+        EXIT_CODE=1 # Mark failure, commit should be aborted
+        continue # Try next entry if any
+    fi
   fi
 
   # --- Stage the Updated Archive ---
