@@ -29,6 +29,37 @@ This will tidy up the end-users project by not cluttering the root of their repo
 
 For the user and within this codebase, completely change terminology from 'init' to 'install'. Examples: the 'install.sh' script becomes 'init.sh', the code comments and methods become 'init' instead of 'install', the documentation is updated to reflect this. There should never be the term 'init' as it relates to git-vault anywhere in the codebase. The only time this isn't true is when it comes to specific "install" commands of third parties or terminal commands for things that AREN'T git-vault.
 
+5) `.vault` instead of `.git-vault`
+
+6) Project Helpers
+During install, check if user has a project config file with tasks in it at the project root, and if so, ask them if they'd like us to optionally add tasks for `git-vault add` and `git-vault remove`. This will greatly improve developer experience by providing a more familiar way for them to interact with git-vault in their projects. Prioritized list to implement:
+
+| Filename                   | Ecosystem                 | Typical Usage Command               | Popularity (approximate rank)           |
+| -------------------------- | ------------------------- | ----------------------------------- | --------------------------------------- |
+| `package.json`             | JavaScript / Node.js      | `npm run`, `yarn run`, `pnpm run`   | ★★★★★ (ubiquitous in JS projects)       |
+| `Makefile`                 | General (C/C++, Go, etc.) | `make`                              | ★★★★☆ (common in OSS, cross-language)   |
+| `Cargo.toml`               | Rust                      | `cargo run`, `cargo build`, `cargo` | ★★★★☆ (ubiquitous in Rust projects)     |
+| `build.gradle` / `*.kts`   | Java / Kotlin             | `gradle`, `./gradlew`               | ★★★★☆ (dominant in JVM projects)        |
+| `pyproject.toml`           | Python                    | `poetry run`, `hatch run`           | ★★★☆☆ (rising, not universal yet)       |
+| `build.sbt`                | Scala                     | `sbt`                               | ★★★☆☆ (standard for Scala)              |
+| `mix.exs`                  | Elixir                    | `mix`                               | ★★★☆☆ (universal in Elixir projects)    |
+| `Rakefile`                 | Ruby                      | `rake`                              | ★★★☆☆ (seen in legacy and gems)         |
+| `Justfile`                 | Rust, general             | `just`                              | ★★☆☆☆ (popular in modern OSS Rust)      |
+| `deno.json` / `deno.jsonc` | Deno                      | `deno task`                         | ★★☆☆☆ (limited to Deno community)       |
+| `Taskfile.yml`             | Go, general               | `task`                              | ★★☆☆☆ (niche but growing)               |
+| `noxfile.py`               | Python                    | `nox`                               | ★★☆☆☆ (used in some test workflows)     |
+| `fabfile.py`               | Python                    | `fab`                               | ★☆☆☆☆ (mostly legacy)                   |
+| `Snakefile`                | Python (Snakemake)        | `snakemake`                         | ★☆☆☆☆ (popular in data science)         |
+| `invoke.yaml`              | Python (Invoke)           | `invoke`                            | ★☆☆☆☆ (niche usage)                     |
+| `moon.yml`                 | Moonrepo (Monorepo)       | `moon run`                          | ★☆☆☆☆ (modern monorepo setups)          |
+| `turbo.json`               | Turborepo                 | `turbo run`                         | ★☆☆☆☆ (rising in frontend monorepos)    |
+| `nx.json`                  | NX                        | `nx run`                            | ★☆☆☆☆ (used in Angular/React monorepos) |
+
+Sorted by **observed popularity in GitHub OSS projects**, focused on repositories with developer-invoked task configs.
+
+
+
+
 ## Completed TODOs
 
 Once TODOs are fully implemented, tested, and documented, move them here for future reference. TODOs in this section no longer need to be implemented and are kept for historical reasons.
