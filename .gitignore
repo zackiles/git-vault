@@ -13,3 +13,7 @@ node_modules/
 
 # Ignore nested git directories in vendored test helpers
 test/test_helper/**/.git
+
+.DS_Store
+*.env
+*.log
