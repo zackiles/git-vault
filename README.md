@@ -65,7 +65,13 @@ The process creates `.vault/` for configuration/storage, an empty `.vault/config
 
 ## Usage
 
-**Add to vault:**
+**First secret? Initialize your vault:**
+
+```bash
+gv init
+```
+
+**Now add a file or folder to the vault:**
 
 ```bash
 gv <path/to/your/secret>
