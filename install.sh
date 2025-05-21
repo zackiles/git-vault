@@ -139,12 +139,24 @@ download_file() {
 
   info "Downloading from $url"
 
+  local http_code
   if command_exists curl; then
-    curl -sSL "$url" -o "$output_file"
+    # Use curl with -w to get the HTTP status code and -f to fail on HTTP errors
+    http_code=$(curl -w '%{http_code}' -sSL "$url" -o "$output_file" || echo "000")
+    if [ "$http_code" != "200" ]; then
+      error "Failed to download file (HTTP $http_code). Please check if the release exists at $url"
+    fi
   elif command_exists wget; then
-    wget -q "$url" -O "$output_file"
+    if ! wget -q --server-response "$url" -O "$output_file" 2>&1 | grep -q '200 OK'; then
+      error "Failed to download file. Please check if the release exists at $url"
+    fi
   else
     error "Neither curl nor wget found"
+  fi
+
+  # Check if the file was actually downloaded and has content
+  if [ ! -s "$output_file" ]; then
+    error "Downloaded file is empty. Please check if the release exists at $url"
   fi
 }
 
@@ -270,6 +282,19 @@ download_and_run() {
 
     local download_url="${REPO_URL}/releases/download/${version}/${zip_file_name}"
 
+    # Check if the release exists before attempting download
+    local release_url="${REPO_API_URL}/releases/tags/${version}"
+    if command_exists curl; then
+      if ! curl -sSL -f "$release_url" > /dev/null 2>&1; then
+        error "Release ${version} not found. Please check available releases at ${REPO_URL}/releases"
+      fi
+    elif command_exists wget; then
+      if ! wget -q --spider "$release_url" 2>/dev/null; then
+        error "Release ${version} not found. Please check available releases at ${REPO_URL}/releases"
+      fi
+    fi
+
+    info "Downloading ${zip_file_name} from release ${version}"
     # Download the zip file
     download_file "$download_url" "$zip_path"
   fi
