@@ -14,16 +14,12 @@
     "build:context": "deno run -A scripts/build-context.ts"
   },
   "unstable": [
-    "kv",
     "net",
     "http",
     "fs",
     "ffi",
-    "cron",
     "temporal",
-    "webgpu",
-    "unsafe-proto",
-    "webgpu"
+
   ],
   "imports": {
     "@std/async": "jsr:@std/async@1",
