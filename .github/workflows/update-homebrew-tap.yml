@@ -44,8 +44,10 @@ jobs:
           # Debug: Print release info
           echo "Release Info: $RELEASE_INFO"
 
-          TAG=$(echo "$RELEASE_INFO" | awk '{print $1}')
+          # Extract the tag from the third column, not the first
+          TAG=$(echo "$RELEASE_INFO" | awk '{print $3}')
           echo "TAG=$TAG" >> $GITHUB_OUTPUT
+          echo "Extracted TAG: $TAG"
           VERSION="${TAG#v}"
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
@@ -55,17 +57,37 @@ jobs:
         run: |
           mkdir -p dist
 
-          # Download the pre-built tar.gz files
-          gh release download ${{ steps.release.outputs.TAG }} -p "gv-macos.tar.gz" -D dist/
-          gh release download ${{ steps.release.outputs.TAG }} -p "gv-macos-arm.tar.gz" -D dist/
-          gh release download ${{ steps.release.outputs.TAG }} -p "gv-linux.tar.gz" -D dist/
-          gh release download ${{ steps.release.outputs.TAG }} -p "gv-linux-arm.tar.gz" -D dist/
+          TAG="${{ steps.release.outputs.TAG }}"
+          echo "Using TAG: $TAG for downloading artifacts"
+
+          # Check if tag is valid
+          if [ -z "$TAG" ]; then
+            echo "Error: Empty tag detected. Cannot download release artifacts."
+            exit 1
+          fi
+
+          # Download the pre-built tar.gz files using the detected tag
+          echo "Downloading gv-macos.tar.gz..."
+          gh release download "$TAG" -p "gv-macos.tar.gz" -D dist/ || { echo "Failed to download gv-macos.tar.gz"; exit 1; }
+
+          echo "Downloading gv-macos-arm.tar.gz..."
+          gh release download "$TAG" -p "gv-macos-arm.tar.gz" -D dist/ || { echo "Failed to download gv-macos-arm.tar.gz"; exit 1; }
+
+          echo "Downloading gv-linux.tar.gz..."
+          gh release download "$TAG" -p "gv-linux.tar.gz" -D dist/ || { echo "Failed to download gv-linux.tar.gz"; exit 1; }
+
+          echo "Downloading gv-linux-arm.tar.gz..."
+          gh release download "$TAG" -p "gv-linux-arm.tar.gz" -D dist/ || { echo "Failed to download gv-linux-arm.tar.gz"; exit 1; }
+
+          echo "All files downloaded successfully. Renaming files..."
 
           # Rename to match Homebrew conventions
           mv dist/gv-macos.tar.gz dist/git-vault-macos.tar.gz
           mv dist/gv-macos-arm.tar.gz dist/git-vault-macos-arm64.tar.gz
           mv dist/gv-linux.tar.gz dist/git-vault-linux.tar.gz
           mv dist/gv-linux-arm.tar.gz dist/git-vault-linux-arm64.tar.gz
+
+          echo "All files renamed successfully."
 
       - name: Compute SHA256 hashes
         id: shasums
