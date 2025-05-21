@@ -5,10 +5,12 @@ on:
     workflows: ["Release"]
     types:
       - completed
+  release:
+    types: [published]
 
 jobs:
   update-homebrew-tap:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event.release }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -28,8 +30,20 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Get the latest release
-          RELEASE_INFO=$(gh release list --limit 1)
+          # Debug: List all releases
+          echo "Listing all releases:"
+          gh release list
+
+          # Get the latest release with more robust error handling
+          RELEASE_INFO=$(gh release list --limit 1 || echo "")
+          if [ -z "$RELEASE_INFO" ]; then
+            echo "No releases found. Exiting workflow."
+            exit 1
+          fi
+
+          # Debug: Print release info
+          echo "Release Info: $RELEASE_INFO"
+
           TAG=$(echo "$RELEASE_INFO" | awk '{print $1}')
           echo "TAG=$TAG" >> $GITHUB_OUTPUT
           VERSION="${TAG#v}"
