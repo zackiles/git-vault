@@ -44,8 +44,8 @@ jobs:
           # Debug: Print release info
           echo "Release Info: $RELEASE_INFO"
 
-          # Extract the tag from the third column, not the first
-          TAG=$(echo "$RELEASE_INFO" | awk '{print $3}')
+          # Get the tag directly from the GitHub CLI
+          TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName')
           echo "TAG=$TAG" >> $GITHUB_OUTPUT
           echo "Extracted TAG: $TAG"
           VERSION="${TAG#v}"
