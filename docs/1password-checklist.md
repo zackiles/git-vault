@@ -19,7 +19,7 @@ We'll add 1Password CLI support to git-vault while maintaining backward compatib
 
 ### 1. Storage Mode Configuration
 
-Create a new file `.git-vault/storage-mode` that contains either:
+Create a new file `.vault/storage-mode` that contains either:
 - `file` - Use traditional file-based password storage
 - `1password` - Use 1Password CLI for password storage
 
@@ -48,7 +48,7 @@ Store git-vault passwords in 1Password using:
 - Add 1Password CLI detection
 - Add prompt for storage mode selection
 - Setup 1Password vault if chosen
-- Store chosen mode in `.git-vault/storage-mode`
+- Store chosen mode in `.vault/storage-mode`
 
 #### add.sh
 - Check storage mode
@@ -71,10 +71,10 @@ Store git-vault passwords in 1Password using:
 ## Implementation Checklist
 
 ### Phase 1: Setup and Configuration
-- [X] Add storage mode configuration file and detection (`install.sh` creates `.git-vault/storage-mode`)
+- [X] Add storage mode configuration file and detection (`install.sh` creates `.vault/storage-mode`)
 - [X] Add 1Password CLI detection to `install.sh`
 - [X] Implement user prompt for storage mode selection (`install.sh`)
-- [X] Create configuration to track 1Password vault name (`install.sh` creates `.git-vault/1password-vault`)
+- [X] Create configuration to track 1Password vault name (`install.sh` creates `.vault/1password-vault`)
 
 ### Phase 2: Core 1Password Integration
 - [X] Implement 1Password sign-in verification (`check_op_status` function in scripts)
@@ -146,7 +146,7 @@ fi
 
 ### 2. Add 1Password Helper Functions
 
-Create a new file `.git-vault/1password-helpers.sh`:
+Create a new file `.vault/1password-helpers.sh`:
 
 ```bash
 #!/bin/sh
@@ -171,7 +171,7 @@ check_op_status() {
 
 # Get Git-Vault vault name
 get_vault_name() {
-  local vault_file=".git-vault/1password-vault"
+  local vault_file=".vault/1password-vault"
   
   if [ -f "$vault_file" ]; then
     cat "$vault_file"

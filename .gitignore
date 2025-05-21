@@ -1,7 +1,7 @@
-.git-vault/*.pw
+.vault/*.pw
 
 # Keep storage tracked
-!.git-vault/storage
+!.vault/storage
 
 # Repomix context file. Don't commit, generate locally when needed.
 codebase-summary.xml
@@ -13,6 +13,9 @@ node_modules/
 
 # Ignore nested git directories in vendored test helpers
 test/test_helper/**/.git
+
+# Build path, only for Github Releases
+bin/
 
 .DS_Store
 *.env

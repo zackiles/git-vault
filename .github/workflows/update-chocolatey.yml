@@ -1,0 +1,140 @@
+name: Update Chocolatey Package
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types:
+      - completed
+
+jobs:
+  check-secrets:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      has-api-key: ${{ steps.check-api-key.outputs.has-api-key }}
+    steps:
+      - id: check-api-key
+        env:
+          CHOCO_KEY_EXISTS: ${{ secrets.CHOCO_API_KEY != '' }}
+        run: |
+          if [[ "$CHOCO_KEY_EXISTS" == "true" ]]; then
+            echo "has-api-key=true" >> $GITHUB_OUTPUT
+          else
+            echo "has-api-key=false" >> $GITHUB_OUTPUT
+            echo "::warning::CHOCO_API_KEY is not available. Skipping Chocolatey package update."
+          fi
+
+  publish-chocolatey:
+    needs: check-secrets
+    if: needs.check-secrets.outputs.has-api-key == 'true'
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get release details
+        id: release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get the latest release
+          RELEASE_INFO=$(gh release list --limit 1)
+          TAG=$(echo "$RELEASE_INFO" | awk '{print $1}')
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+          VERSION="${TAG#v}"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download release artifacts
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p choco-pkg/tools
+          gh release download ${{ steps.release.outputs.TAG }} -p "gv-windows.exe.zip" -D ./choco-pkg/tools
+
+      - name: Generate Chocolatey package files
+        shell: powershell
+        run: |
+          $version = "${{ steps.release.outputs.VERSION }}"
+
+          # Create nuspec file
+          @"
+          <?xml version="1.0" encoding="utf-8"?>
+          <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+            <metadata>
+              <id>git-vault</id>
+              <version>$version</version>
+              <title>Git Vault</title>
+              <authors>zackiles</authors>
+              <projectUrl>https://github.com/zackiles/git-vault</projectUrl>
+              <licenseUrl>https://github.com/zackiles/git-vault/blob/main/LICENSE</licenseUrl>
+              <requireLicenseAcceptance>false</requireLicenseAcceptance>
+              <description>Drop-dead simple solution for sharing sensitive things in git repositories</description>
+              <tags>git security secrets vault encryption</tags>
+            </metadata>
+            <files>
+              <file src="tools\**" target="tools" />
+            </files>
+          </package>
+          "@ | Out-File -Encoding utf8 -FilePath .\choco-pkg\git-vault.nuspec
+
+          # Create chocolateyInstall.ps1
+          @"
+          `$ErrorActionPreference = 'Stop'
+
+          `$toolsDir = "`$(Split-Path -Parent `$MyInvocation.MyCommand.Definition)"
+          `$zipFile = Get-ChildItem -Path `$toolsDir -Filter "gv-windows.exe.zip" | Select-Object -First 1 -ExpandProperty FullName
+
+          `$packageArgs = @{
+            packageName    = 'git-vault'
+            unzipLocation  = `$toolsDir
+            file           = `$zipFile
+          }
+
+          Get-ChocolateyUnzip @packageArgs
+
+          # Rename the binary file to git-vault.exe
+          `$exeFile = Get-ChildItem -Path `$toolsDir -Filter "gv-windows.exe" | Select-Object -First 1 -ExpandProperty FullName
+          Rename-Item -Path `$exeFile -NewName "git-vault.exe" -Force
+          "@ | Out-File -Encoding utf8 -FilePath .\choco-pkg\tools\chocolateyInstall.ps1
+
+          # Create verification file
+          @"
+          VERIFICATION
+          Verification is intended to assist the Chocolatey moderators and community
+          in verifying that this package's contents are trustworthy.
+
+          This package is published by the git-vault project itself. The binaries are
+          identical to those in the released zip files from the official GitHub releases.
+
+          URL: https://github.com/zackiles/git-vault/releases/tag/v$version
+          "@ | Out-File -Encoding utf8 -FilePath .\choco-pkg\tools\VERIFICATION.txt
+
+      - name: Install Chocolatey
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force
+          [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+          iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+      - name: Build Chocolatey package
+        shell: powershell
+        run: |
+          cd choco-pkg
+          choco pack git-vault.nuspec
+
+      - name: Push to Chocolatey.org
+        if: success()
+        shell: powershell
+        env:
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+        run: |
+          cd choco-pkg
+          # Use the API key from secrets
+          choco apikey --key $env:CHOCO_API_KEY --source https://push.chocolatey.org/
+          # Push the package
+          choco push git-vault.${{ steps.release.outputs.VERSION }}.nupkg --source https://push.chocolatey.org/ --api-key $env:CHOCO_API_KEY

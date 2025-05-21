@@ -1,11 +1,15 @@
 {
+  "deno.enable": true,
+  "deno.lint": true,
+  "deno.config": "./deno.json",
   "files.eol": "\n",
   "files.insertFinalNewline": true,
   "files.trimFinalNewlines": true,
   "editor.detectIndentation": false,
   "editor.indentSize": 2,
   "editor.insertSpaces": true,
-  "[markdown]": {
+  "[markdown][typescript][javascript]": {
+    "editor.defaultFormatter": "denoland.vscode-deno",
     "editor.formatOnSave": true
   },
   "files.associations": {
@@ -44,6 +48,14 @@
     "USERPROFILE",
     "unvalidated",
     "somevalue",
-    "testuser"
+    "testuser",
+    "testpassword",
+    "EOFORMULA",
+    "valibot",
+    "choco",
+    "dryrun",
+    "apikey",
+    "shasums"
+
   ],
 }

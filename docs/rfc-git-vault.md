@@ -1,4 +1,4 @@
-# RFC: Git-Vault
+# RFC: Git-Vault (DEPRECATED)
 
 ## Overview  
 Many projects need to include sensitive folders in the repo for local use but must keep them hidden on public remotes. Git-Vault provides a wrapper around Git hooks and simple shell scripts to transparently encrypt selected folders into versioned archives and decrypt them on checkout/merge across macOS, Linux and Git-Bash on Windows.
@@ -128,8 +128,8 @@ tar czf - -C "$REPO" "$PATH_IN" | gpg --batch --passphrase-file "$PWFILE" --ciph
 
 # Add archive to git (user should commit)
 # Check if Git LFS is configured and if the archive is large enough to use LFS
-if [ -f "$REPO/.git-vault/lfs-config" ]; then
-  MIN_LFS=$(cat "$REPO/.git-vault/lfs-config")
+if [ -f "$REPO/.vault/lfs-config" ]; then
+  MIN_LFS=$(cat "$REPO/.vault/lfs-config")
   ARCHIVE_SIZE=$(du -m "$ARCHIVE" | cut -f1)
   
   if [ "$ARCHIVE_SIZE" -ge "$MIN_LFS" ] && command -v git-lfs >/dev/null 2>&1; then

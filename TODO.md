@@ -7,7 +7,7 @@ Before marking a TODO done, run all tests. If they pass, mark it and the impleme
 ### 1 ) Integrate 1Password for Passwords
 
 - **Objective**: Provide a way other than file-based passwords by allowing a seamless 1Password CLI integration.
-- `install.sh` asks if they want to use 1Password  or regular file. (if the CLI is detected) otherwise it defaults to regular files.
+- `install.sh` asks if they want to use 1Password or regular file. (if the CLI is detected) otherwise it defaults to regular files.
 - All other logic in scripts stays the same except they know if they're using file or 1Password and encrypt/decrypt using a password or key stored on 1Password and managed through the 1Password CLI.
 - Multiple passwords can be created for multiple files in the same project.
 - The pattern for how to store the password or key IN 1Password should be idiomatic, intuitive, and seamless so that the user doesn't need to do anything and the password entries don't clutter or collide with their workspace.
@@ -19,19 +19,19 @@ Before marking a TODO done, run all tests. If they pass, mark it and the impleme
 Investigate supporting Symmetric Keys for Git-Vault. Borrow inspiration from the open source project [git-crypt]([git-crypt](https://github.com/AGWA/git-crypt)) by reviewing its documentation and code. git-crypt currently supports Symmetric Keys. Generate a TODO that documents the objective and what is needed to get feature parity with git-crypt in its usage of Symmetric Keys for encrypting and decrypting files. This TODO is to create another TODO.
 
 ### 3 ) Field Encryption For JSON and YAML
+
 If the `add` command detects a JSON or YAML file it will prompt a user to ask if they want to encrypt just the values of all fields in the file when storing it in the vault, or do a full file encryption.
 
-### 4 ) Put`.pw` files in the `.git-vault` folder
+### 4 ) Put`.pw` files in the `.vault` folder
 
 This will tidy up the end-users project by not cluttering the root of their repository with .pw files
 
-### 5 ) Rename Install to Init
+### 5 ) ✅ Rename Install to Init
 
-For the user and within this codebase, completely change terminology from 'init' to 'install'. Examples: the 'install.sh' script becomes 'init.sh', the code comments and methods become 'init' instead of 'install', the documentation is updated to reflect this. There should never be the term 'init' as it relates to git-vault anywhere in the codebase. The only time this isn't true is when it comes to specific "install" commands of third parties or terminal commands for things that AREN'T git-vault.
+DONE: For the user and within this codebase, completely changed terminology from 'install' to 'init'. The install command is now 'init', code comments and methods use 'init' instead of 'install', and the documentation has been updated to reflect this. The only time 'install' is used is when it comes to specific "install" commands of third parties or terminal commands for things that AREN'T git-vault.
 
-5) `.vault` instead of `.git-vault`
+### 6 ) Project Helpers
 
-6) Project Helpers
 During install, check if user has a project config file with tasks in it at the project root, and if so, ask them if they'd like us to optionally add tasks for `git-vault add` and `git-vault remove`. This will greatly improve developer experience by providing a more familiar way for them to interact with git-vault in their projects. Prioritized list to implement:
 
 | Filename                   | Ecosystem                 | Typical Usage Command               | Popularity (approximate rank)           |
@@ -57,9 +57,6 @@ During install, check if user has a project config file with tasks in it at the 
 
 Sorted by **observed popularity in GitHub OSS projects**, focused on repositories with developer-invoked task configs.
 
-
-
-
 ## Completed TODOs
 
 Once TODOs are fully implemented, tested, and documented, move them here for future reference. TODOs in this section no longer need to be implemented and are kept for historical reasons.
@@ -81,31 +78,31 @@ Once TODOs are fully implemented, tested, and documented, move them here for fut
 
 After a recent change a test started failing that says: (`[Error] add.sh fails if gpg dependency is missing` in `test/errors.bats`) Fix it. Here is some information from the previous developer who last tried to fix it:
 
-1.  **Purpose of the Test:**
-    *   This test aimed to verify that the `.git-vault/add.sh` script correctly detects if the required `gpg` (GnuPG) command-line tool is missing from the system's `PATH`.
-    *   It should gracefully fail and inform the user about the missing dependency, preventing unexpected errors later during encryption.
-    *   The test originally worked by temporarily modifying the `PATH` environment variable within the test's execution context. It pointed `PATH` to a temporary directory containing a fake `gpg` script designed to exit with an error, simulating the absence of the real `gpg`.
+1. **Purpose of the Test:**
+   - This test aimed to verify that the `.vault/add.sh` script correctly detects if the required `gpg` (GnuPG) command-line tool is missing from the system's `PATH`.
+   - It should gracefully fail and inform the user about the missing dependency, preventing unexpected errors later during encryption.
+   - The test originally worked by temporarily modifying the `PATH` environment variable within the test's execution context. It pointed `PATH` to a temporary directory containing a fake `gpg` script designed to exit with an error, simulating the absence of the real `gpg`.
 
-2.  **Relation to Recent Changes and Why It Failed:**
-    *   The test started failing (specifically, timing out) after the "Single Folder for Git Vault" refactoring, which moved scripts from `git-vault/` to `.git-vault/` and storage to `.git-vault/storage/`.
-    *   While the refactoring primarily changed file paths, the test's method of manipulating the `PATH` environment variable within the Bats testing framework seems to have become unstable.
-    *   It's likely that the interaction between the Bats execution environment, the `run` command (which uses subshells), the `PATH` modification, and potentially the script's internal logic created a hang or an exceptionally long execution time, leading to consistent timeouts (>120 seconds). The exact cause of the hang wasn't pinpointed during the previous debug session.
+2. **Relation to Recent Changes and Why It Failed:**
+   - The test started failing (specifically, timing out) after the "Single Folder for Git Vault" refactoring, which moved scripts from `git-vault/` to `.vault/` and storage to `.vault/storage/`.
+   - While the refactoring primarily changed file paths, the test's method of manipulating the `PATH` environment variable within the Bats testing framework seems to have become unstable.
+   - It's likely that the interaction between the Bats execution environment, the `run` command (which uses subshells), the `PATH` modification, and potentially the script's internal logic created a hang or an exceptionally long execution time, leading to consistent timeouts (>120 seconds). The exact cause of the hang wasn't pinpointed during the previous debug session.
 
-3.  **Reason for Skipping:**
-    *   Due to the persistent timeouts that could not be quickly resolved, and to allow the rest of the test suite to pass validation, this specific test was marked as `skip`.
+3. **Reason for Skipping:**
+   - Due to the persistent timeouts that could not be quickly resolved, and to allow the rest of the test suite to pass validation, this specific test was marked as `skip`.
 
-4.  **Next Steps to Investigate and Fix:**
-    *   **Isolate:** Run the test individually using `bats test/errors.bats -f "gpg dependency"` to remove the `test/run-tests.sh` wrapper and simplify the execution environment.
-    *   **Debug:** Add verbose tracing (`set -x`) inside the test function in `test/errors.bats` and potentially within the `setup_path_override` function in `test/test_helper.bash` to see exactly where execution hangs.
-    *   **Review `add.sh`:** Double-check the dependency check logic within `.git-vault/add.sh`. Ensure it's robust and doesn't have unexpected behavior when `gpg` isn't found.
-    *   **Alternative Simulation:** Explore alternative ways to simulate a missing `gpg` command without altering the `PATH` directly within the test, as this seems fragile. This is challenging in Bash but might involve temporarily renaming the real `gpg` if run in a very controlled environment (use caution) or modifying the script's check if possible (less ideal).
-    *   **Evaluate Necessity:** Consider if this specific test case (explicitly checking for a missing dependency via PATH manipulation) provides enough value to justify the debugging effort, given that other tests implicitly rely on `gpg` being present and functional.
+4. **Next Steps to Investigate and Fix:**
+   - **Isolate:** Run the test individually using `bats test/errors.bats -f "gpg dependency"` to remove the `test/run-tests.sh` wrapper and simplify the execution environment.
+   - **Debug:** Add verbose tracing (`set -x`) inside the test function in `test/errors.bats` and potentially within the `setup_path_override` function in `test/test_helper.bash` to see exactly where execution hangs.
+   - **Review `add.sh`:** Double-check the dependency check logic within `.vault/add.sh`. Ensure it's robust and doesn't have unexpected behavior when `gpg` isn't found.
+   - **Alternative Simulation:** Explore alternative ways to simulate a missing `gpg` command without altering the `PATH` directly within the test, as this seems fragile. This is challenging in Bash but might involve temporarily renaming the real `gpg` if run in a very controlled environment (use caution) or modifying the script's check if possible (less ideal).
+   - **Evaluate Necessity:** Consider if this specific test case (explicitly checking for a missing dependency via PATH manipulation) provides enough value to justify the debugging effort, given that other tests implicitly rely on `gpg` being present and functional.
 
 ### Single Folder for Git Vault
 
 - **Objective**: Reduce clutter in the user's project by centralizing all things related to git-vault(except the git hooks) to a single folder.
 - The single folder on the user's project stores: all `.sh` scripts that are installed, `paths.list`, the main `README.md` of git-vault, and a subfolder for storage.
-- Name the folder `.git-vault` and the storage subfolder `.git-vault/storage`.
+- Name the folder `.vault` and the storage subfolder `.vault/storage`.
 - Update all and tests/docs to reflect the new design.
 
 ### 2 ) Optionally Install Dependencies for Users

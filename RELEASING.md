@@ -1,72 +1,78 @@
-# Git-Vault Release Process
+# Package Manager Integration for Git Vault
 
-This document outlines the process for creating and publishing releases of Git-Vault.
+This document describes how Git Vault is distributed through package managers like Homebrew and Chocolatey.
 
-## Release Workflow
+## Overview
 
-Git-Vault uses GitHub Actions to automate the release process. The workflow is triggered when a tag matching the pattern `vx.x.x` (e.g., `v1.0.0`) is pushed to the main branch.
+Git Vault is available through:
 
-### What the Release Workflow Does
+1. **Homebrew** - For macOS and Linux users (both x86_64 and ARM64)
+2. **Chocolatey** - For Windows users (x86_64)
 
-1. **Test Phase**:
-   - Runs the full test suite using bats
-   - Ensures all functionality works correctly before creating a release
-   - Fails the release process if any tests fail
+These package managers are automatically updated when new releases are published via GitHub Actions workflows.
 
-2. **Release Phase** (if tests pass):
-   - Creates a GitHub Release for the tag
-   - Includes the following files in the release:
-     - `add.sh`
-     - `remove.sh`
-     - `encrypt.sh` 
-     - `decrypt.sh`
-     - `install.sh`
-     - `README.md`
-     - `LICENSE`
-   - Uses the commit message of the tagged commit as the release changelog
+## Installation Instructions
 
-## How to Create a Release
+### Homebrew (macOS and Linux)
 
-1. **Make sure your code is ready**:
-   - All tests should pass locally
-   - All changes should be committed to the main branch
-   - The main branch should be up to date with origin
+```bash
+# Install via Homebrew
+brew tap zackiles/homebrew-git-vault
+brew install git-vault
+```
 
-2. **Create and push a version tag**:
-   ```bash
-   # Ensure you're on the main branch
-   git checkout main
-   
-   # Create a version tag (replace X.Y.Z with the actual version)
-   git tag -a vX.Y.Z -m "Release vX.Y.Z: <changelog details>"
-   
-   # Push the tag to trigger the release workflow
-   git push origin vX.Y.Z
-   ```
+### Chocolatey (Windows)
 
-3. **Verify the release**:
-   - Go to GitHub Actions tab to monitor the workflow
-   - Once completed, check the Releases page to verify the release was created correctly
-   - Test the installation script to ensure it works properly with the new release
+```powershell
+# Install via Chocolatey
+choco install git-vault
+```
 
-## Versioning Guidelines
+## How It Works
 
-Git-Vault follows semantic versioning (SemVer):
+### Automated Release Process
 
-- **MAJOR version (X)**: Incompatible API changes
-- **MINOR version (Y)**: Add functionality in a backward-compatible manner
-- **PATCH version (Z)**: Backward-compatible bug fixes
+When a new version is tagged and released:
 
-## Release Dependencies
+1. The main release workflow (`release.yml`) builds binaries for all supported platforms:
+   - Linux (x86_64, ARM64)
+   - macOS (x86_64, ARM64)
+   - Windows (x86_64)
 
-The release workflow requires several dependencies to run the tests:
+2. The Homebrew workflow (`update-homebrew-tap.yml`) is triggered by the release event:
+   - Creates tar.gz archives suitable for Homebrew
+   - Computes SHA256 hashes
+   - Updates the formula in the tap repository with platform-specific binaries
+   - Pushes the changes using the default GITHUB_TOKEN
+   - No additional tokens needed as the tap is in the same GitHub account
 
-- **Git**: Used for repository operations and properly configured in the GitHub Action
-- **GPG (GnuPG)**: Required for encryption/decryption operations
-- **tar**: Used for creating and extracting archives
-- **coreutils**: Provides `sha1sum` and `mktemp` utilities
-- **sed**: Used for text manipulation in scripts
-- **bats-core**: Testing framework used to run the test suite
-- **bats helper libraries**: Already included in the repository under `test/test_helper/`
+3. The Chocolatey workflow (`update-chocolatey.yml`) is triggered by the release event:
+   - Packages Windows binaries according to Chocolatey standards
+   - Publishes the package to Chocolatey.org
 
-All these dependencies are automatically installed in the GitHub Actions runner as part of the workflow. 
+## Required Secrets
+
+The following secret needs to be configured in the GitHub repository:
+
+1. `CHOCO_API_KEY` - An API key for Chocolatey.org to publish packages
+
+> **Note:** If the Chocolatey API key is not available, only that workflow will be skipped without affecting the main release process or Homebrew updates. You can see a warning message in the GitHub Actions logs.
+
+## Troubleshooting
+
+### Homebrew Formula Issues
+
+If the Homebrew formula fails to update:
+
+1. Check logs in the `update-homebrew-tap` workflow
+2. Verify that the release workflow completed successfully
+3. Ensure the tap repository exists at `zackiles/homebrew-git-vault`
+4. Check that the release assets were uploaded correctly
+
+### Chocolatey Package Issues
+
+If the Chocolatey package fails to publish:
+
+1. Check logs in the `update-chocolatey` workflow
+2. Verify that the `CHOCO_API_KEY` is valid
+3. Try submitting the package manually through the Chocolatey website

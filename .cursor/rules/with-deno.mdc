@@ -1,0 +1,30 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# USE `@std/` Libraries
+ALWAYS use these packages instead of alternatives:
+
+```ts
+import {
+  parseArgs,
+  // see https://jsr.io/@std/cli@1.0.17/doc/~/
+  promptSecret,
+  promptSecret
+} from '@std/cli'
+
+// see https://jsr.io/@std/cli@1.0.17/doc/unstable-prompt-multiple-select/~/promptMultipleSelect
+import { promptMultipleSelect } from '@std/cli/unstable-prompt-multiple-select'
+
+// see https://jsr.io/@std/cli@1.0.17/doc/unstable-progress-bar-stream/~/ProgressBarStream
+import { ProgressBarStream } from '@std/cli/unstable-progress-bar-stream'
+
+// see https://jsr.io/@std/cli@1.0.17/doc/unstable-prompt-select/~/promptSelect
+import { promptSelect } from '@std/cli/unstable-prompt-select'
+
+// see https://jsr.io/@std/cli@1.0.17/doc/unstable-spinner/~/Spinner
+import { Spinner} from '@std/cli/unstable-spinner'
+```
+
+NOTE: Links to the documentation of the methods are shown above the imports that use can search the web for and understand usage if you're unsure.

@@ -1,676 +1,505 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
+# Git-Vault Installer
+# -------------------
+# This script downloads and installs git-vault, a tool for securely
+# storing sensitive files in Git repositories using GPG encryption.
+
+# GitHub repository configuration
+REPO_OWNER="zackiles"
+REPO_NAME="git-vault"
+REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}"
+REPO_API_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}"
+RAW_CONTENT_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main"
+
+# Usage:
+#   ./install.sh                   # Download and run the installer
+#   ./install.sh --version v0.1.0  # Install specific version
+#   ./install.sh --uninstall       # Remove git-vault
+#   ./install.sh --local-zip PATH  # Use a local zip file (for testing)
+#
+# One-line installation:
+#   curl -fsSL ${RAW_CONTENT_URL}/install.sh | bash
+#
+# Install specific version:
+#   curl -fsSL ${RAW_CONTENT_URL}/install.sh | bash -s -- --version v0.1.0
+
 set -e
 
-# --- Handle TTY / Piped Execution ---
-# Check if we're being piped (no TTY) but need TTY for prompts
-if [ ! -t 0 ]; then
-  # We're being run via a pipe (curl | bash), so we need to re-execute with a TTY
-  TEMP_SCRIPT=$(mktemp)
-  # Use the same URL source (whether official or testing)
-  if [ -n "${GIT_VAULT_RELEASE_URL:-}" ]; then
-    SCRIPT_URL="${GIT_VAULT_RELEASE_URL}/install.sh"
-  else
-    SCRIPT_URL="https://github.com/zackiles/git-vault/releases/latest/download/install.sh"
-  fi
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
 
-  echo "Running in a pipe - downloading script for proper interactive mode..."
-  if command -v curl > /dev/null; then
-    curl -sSL "$SCRIPT_URL" > "$TEMP_SCRIPT"
-  elif command -v wget > /dev/null; then
-    wget -q "$SCRIPT_URL" -O "$TEMP_SCRIPT"
-  else
-    echo "Error: Neither curl nor wget found. Cannot download script for interactive mode"
-    exit 1
-  fi
-
-  chmod +x "$TEMP_SCRIPT"
-  # Re-execute with the same arguments but with TTY access
-  if [ -t 1 ]; then
-    # We have a TTY for stdout, use it for stdin too
-    exec "$TEMP_SCRIPT" "$@" < /dev/tty
-  else
-    # No TTY available at all, proceed with defaults
-    echo "No TTY available, proceeding with non-interactive installation..."
-    # Continue with the current execution
-  fi
-  # We'll only get here if the re-exec doesn't happen
-  rm -f "$TEMP_SCRIPT"
-fi
-
-# --- Constants ---
-# Allow configuration of release URL via environment variable (useful for testing)
-GITHUB_RELEASE_BASE_URL="${GIT_VAULT_RELEASE_URL:-https://github.com/zackiles/git-vault/releases/latest/download}"
-EMBEDDED_PATHS_LIST="# Git-Vault Managed Paths
-# Format: <file-path>#<hash>
-# Do not edit manually"
-# Default LFS threshold in MB
-DEFAULT_LFS_THRESHOLD=5
-
-# --- Dependency Management ---
-# List of required dependencies and their package names for different platforms
-REQUIRED_DEPS="gpg tar mktemp"
-SHASUM_DEPS="sha1sum shasum" # At least one must be present
-SED_DEPS="sed" # Additional utilities
-
-# Package names for different platforms
-LINUX_APT_PACKAGES="gnupg tar coreutils sed"
-LINUX_DNF_PACKAGES="gnupg tar coreutils sed"
-LINUX_PACMAN_PACKAGES="gnupg tar coreutils sed"
-MACOS_BREW_PACKAGES="gnupg coreutils"
-
-# Function to check if a command exists
-check_dependency() {
-  command -v "$1" >/dev/null 2>&1
+# Print colored message
+print_message() {
+  local color="$1"
+  local message="$2"
+  echo -e "${color}${message}${NC}"
 }
 
-# Function to check if any of the alternative commands exist
-check_alternative_deps() {
-  local found=false
-  for cmd in $1; do
-    if check_dependency "$cmd"; then
-      found=true
-      break
-    fi
-  done
-  [ "$found" = true ]
+# Print error message and exit
+error() {
+  print_message "${RED}" "ERROR: $1"
+  exit 1
 }
 
-# Function to detect the platform and package manager
-detect_platform() {
-  local kernel
-  kernel=$(uname -s)
-  case "$kernel" in
-    Linux)
-      if [ -f /etc/debian_version ] || [ -f /etc/ubuntu_version ] || command -v apt-get >/dev/null 2>&1; then
-        echo "linux-apt"
-      elif [ -f /etc/fedora-release ] || command -v dnf >/dev/null 2>&1; then
-        echo "linux-dnf"
-      elif [ -f /etc/arch-release ] || command -v pacman >/dev/null 2>&1; then
-        echo "linux-pacman"
-      else
-        echo "linux-unknown"
-      fi
-      ;;
-    Darwin)
-      echo "macos"
-      ;;
-    CYGWIN*|MINGW*|MSYS*)
-      echo "windows"
-      ;;
-    *)
-      echo "unknown"
-      ;;
-  esac
+# Print info message
+info() {
+  print_message "${BLUE}" "INFO: $1"
 }
 
-# Function to check all dependencies and return list of missing ones
-check_all_dependencies() {
-  local missing_deps=""
-
-  # Check required dependencies
-  for dep in $REQUIRED_DEPS; do
-    if ! check_dependency "$dep"; then
-      missing_deps="$missing_deps $dep"
-    fi
-  done
-
-  # Check for sha1sum or shasum
-  if ! check_alternative_deps "$SHASUM_DEPS"; then
-    missing_deps="$missing_deps sha1sum/shasum"
-  fi
-
-  # Check additional utilities
-  for dep in $SED_DEPS; do
-    if ! check_dependency "$dep"; then
-      missing_deps="$missing_deps $dep"
-    fi
-  done
-
-  echo "$missing_deps"
+# Print success message
+success() {
+  print_message "${GREEN}" "SUCCESS: $1"
 }
 
-# Function to install dependencies based on platform
-install_dependencies() {
-  local platform="$1"
-  local missing_deps="$2"
-  local exit_code=0
+# Print warning message
+warning() {
+  print_message "${YELLOW}" "WARNING: $1"
+}
 
-  case "$platform" in
-    linux-apt)
-      echo "Installing dependencies using apt..."
-      if ! sudo apt-get update; then
-        echo "Error: Failed to update package lists" >&2
-        return 1
-      fi
-      if ! sudo apt-get install -y $LINUX_APT_PACKAGES; then
-        echo "Error: Failed to install packages" >&2
-        return 1
-      fi
-      ;;
-    linux-dnf)
-      echo "Installing dependencies using dnf..."
-      if ! sudo dnf install -y $LINUX_DNF_PACKAGES; then
-        echo "Error: Failed to install packages" >&2
-        return 1
-      fi
-      ;;
-    linux-pacman)
-      echo "Installing dependencies using pacman..."
-      if ! sudo pacman -Sy --noconfirm $LINUX_PACMAN_PACKAGES; then
-        echo "Error: Failed to install packages" >&2
-        return 1
-      fi
-      ;;
-    macos)
-      if ! command -v brew >/dev/null 2>&1; then
-        echo "Homebrew is required but not installed. Please install Homebrew first:"
-        echo "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
-        return 1
-      fi
-      echo "Installing dependencies using Homebrew..."
-      if ! brew install $MACOS_BREW_PACKAGES; then
-        echo "Error: Failed to install packages" >&2
-        return 1
-      fi
-      ;;
-    windows)
-      echo "Git Bash/MinGW environment detected."
-      echo "Most dependencies should be included with Git for Windows."
-      echo "If any are missing, please install Git for Windows with all components:"
-      echo "  https://git-scm.com/download/win"
-      return 0
-      ;;
-    *)
-      echo "Error: Unsupported platform for automatic dependency installation" >&2
-      return 1
-      ;;
-  esac
+# Compare version strings
+# Returns 0 if v1 > v2, 1 if v1 < v2, 2 if equal
+compare_versions() {
+  local v1="$1"
+  local v2="$2"
 
-  # Re-verify that all dependencies are now installed
-  echo "Verifying installation of dependencies..."
-  local still_missing=""
+  # Remove 'v' prefix if present
+  v1="${v1#v}"
+  v2="${v2#v}"
 
-  # Check required dependencies again
-  for dep in $REQUIRED_DEPS; do
-    if ! check_dependency "$dep"; then
-      still_missing="$still_missing $dep"
-    fi
-  done
-
-  # Check for sha1sum or shasum again
-  if ! check_alternative_deps "$SHASUM_DEPS"; then
-    still_missing="$still_missing sha1sum/shasum"
-  fi
-
-  # Check additional utilities again
-  for dep in $SED_DEPS; do
-    if ! check_dependency "$dep"; then
-      still_missing="$still_missing $dep"
-    fi
-  done
-
-  if [ -n "$still_missing" ]; then
-    echo "Error: Some dependencies are still missing after installation:$still_missing" >&2
-    echo "Please install them manually" >&2
+  # Use sort to compare the versions
+  if [ "$v1" = "$v2" ]; then
+    return 2
+  elif [ "$(printf '%s\n' "$v1" "$v2" | sort -V | head -n1)" = "$v1" ]; then
     return 1
-  fi
-
-  echo "All dependencies successfully installed!"
-  return $exit_code
-}
-
-# --- 1Password Helper Functions (to be used later in other scripts too) ---
-# These are added here for install-time checks and config.
-# They will be duplicated in other scripts as needed since we are not creating a separate helper file.
-
-# Check if 1Password CLI is available and properly signed in
-check_op_status() {
-  # Check if op command exists
-  if ! command -v op >/dev/null 2>&1; then
-    echo "Error: 1Password CLI 'op' not found. Install it from https://1password.com/downloads/command-line/" >&2
-    return 1
-  fi
-
-  # Check if user is signed in
-  if ! op whoami >/dev/null 2>&1; then
-    echo "Error: Not signed in to 1Password CLI. Sign in with: op signin" >&2
-    return 1
-  fi
-
-  return 0
-}
-
-# Get Git-Vault vault name
-get_vault_name() {
-  local vault_file="$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/1password-vault" # Use absolute path during install
-
-  if [ -f "$vault_file" ]; then
-    cat "$vault_file"
   else
-    echo "Git-Vault" # Default vault name
-  fi
-}
-
-# Get project name for item naming
-get_project_name() {
-  # Try to get the project name from the repository
-  local project_name
-
-  # First try from the origin remote URL within the target repo
-  project_name=$(git -C "$TARGET_REPO_ROOT" remote get-url origin 2>/dev/null | sed -E 's|^.*/([^/]+)(\\.git)?$|\\1|' || true)
-
-  # If that fails, use the directory name of the target repo
-  if [ -z "$project_name" ]; then
-    project_name=$(basename "$TARGET_REPO_ROOT")
-  fi
-
-  echo "$project_name"
-}
-# --- End 1Password Helper Functions ---
-
-# --- Helper Functions ---
-# Downloads a file from GitHub releases if not found locally
-download_or_use_local() {
-  local filename="$1"
-  local target_path="$2"
-  local source_dir="$3"
-
-  # First try to use local file (for local development/testing)
-  if [ -f "${source_dir}/${filename}" ]; then
-    echo "Using local copy of ${filename}"
-    cp "${source_dir}/${filename}" "${target_path}"
     return 0
   fi
-
-  # If local file not found, try to download from GitHub releases
-  echo "Local copy of ${filename} not found, downloading from GitHub releases..."
-  if command -v curl > /dev/null; then
-    if ! curl -fsSL "${GITHUB_RELEASE_BASE_URL}/${filename}" -o "${target_path}"; then
-      echo "Error: Failed to download ${filename} using curl"
-      return 1
-    fi
-  elif command -v wget > /dev/null; then
-    if ! wget -q "${GITHUB_RELEASE_BASE_URL}/${filename}" -O "${target_path}"; then
-      echo "Error: Failed to download ${filename} using wget"
-      return 1
-    fi
-  else
-    echo "Error: Neither curl nor wget found. Cannot download ${filename}"
-    return 1
-  fi
-
-  # Verify download succeeded
-  if [ ! -s "${target_path}" ]; then
-    echo "Error: Downloaded file ${filename} is empty or failed to download"
-    return 1
-  fi
-
-  echo "Successfully downloaded ${filename}"
-  return 0
 }
 
-# --- Parse Arguments ---
-TARGET_DIR=""
-LFS_THRESHOLD=$DEFAULT_LFS_THRESHOLD
-STORAGE_MODE="file" # Default storage mode
-OP_VAULT_NAME="Git-Vault" # Default 1Password vault name
-USE_1PASSWORD=false
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    -t|--target-dir)
-      if [ -z "$2" ] || [ "${2#-}" != "$2" ]; then
-        echo "Error: $1 requires a directory path argument" >&2
-        exit 1
-      fi
-      TARGET_DIR="$2"
-      shift 2
-      ;;
-    --min-lfs=*)
-      LFS_THRESHOLD="${1#*=}"
-      if ! echo "$LFS_THRESHOLD" | grep -Eq '^[0-9]+$'; then
-        echo "Error: --min-lfs requires a positive integer value in MB" >&2
-        exit 1
-      fi
-      shift
-      ;;
-    --min-lfs)
-      if [ -z "$2" ] || ! echo "$2" | grep -Eq '^[0-9]+$'; then
-        echo "Error: $1 requires a positive integer value in MB" >&2
-        exit 1
-      fi
-      LFS_THRESHOLD="$2"
-      shift 2
-      ;;
-    *)
-      echo "Error: Unknown option $1" >&2
-      echo "Usage: $0 [--target-dir|-t <directory>] [--min-lfs=<size-in-MB>]" >&2
-      exit 1
-      ;;
+# Determine OS and architecture
+detect_platform() {
+  local os
+  local arch
+
+  case "$(uname -s)" in
+    Linux*)  os="linux";;
+    Darwin*) os="macos";;
+    MINGW*|MSYS*|CYGWIN*) os="windows";;
+    *)       error "Unsupported operating system: $(uname -s)";;
   esac
-done
 
-# --- Main Script ---
-# Check for dependencies
-platform=$(detect_platform)
-missing_deps=$(check_all_dependencies)
-
-if [ -n "$missing_deps" ]; then
-  echo "Missing required dependencies:$missing_deps"
-  echo
-
-  if [ "$platform" = "unknown" ] || [ "$platform" = "linux-unknown" ]; then
-    echo "Error: Your platform does not support automatic dependency installation."
-    echo "Please install the following dependencies manually:$missing_deps"
-    exit 1
-  fi
-
-  printf "Would you like to install the missing dependencies? [y/N] "
-  read -r REPLY
-  echo
-    case "$REPLY" in
-    [Yy]*)
-      if ! install_dependencies "$platform" "$missing_deps"; then
-        echo "Error: Failed to install dependencies. Please install them manually:$missing_deps"
-        exit 1
-      fi
-      echo "Dependencies installed successfully."
-      ;;
-    *)
-      echo "Dependencies are required for git-vault to function properly."
-      echo "Please install them manually:$missing_deps"
-      exit 1
-      ;;
-  esac
-fi
-
-# --- Main Installation Logic ---
-# Use specified target directory or default to current git repo root
-if [ -z "$TARGET_DIR" ]; then
-  TARGET_REPO_ROOT=$(git rev-parse --show-toplevel) || exit 1
-  echo "No target directory specified, using current git repository root: $TARGET_REPO_ROOT"
-else
-  if [ ! -d "$TARGET_DIR" ]; then
-    echo "Error: Target directory $TARGET_DIR does not exist or is not a directory" >&2
-    exit 1
-  fi
-  # Use absolute path for target directory
-  TARGET_REPO_ROOT=$(cd "$TARGET_DIR" && pwd) || exit 1
-  echo "Using specified target directory: $TARGET_REPO_ROOT"
-fi
-
-# Ensure target directory is a git repository
-if [ ! -d "$TARGET_REPO_ROOT/.git" ] && ! git -C "$TARGET_REPO_ROOT" rev-parse --git-dir > /dev/null 2>&1; then
-  echo "Error: Target directory $TARGET_REPO_ROOT is not a git repository" >&2
-  exit 1
-fi
-
-cd "$TARGET_REPO_ROOT" || exit 1
-
-TARGET_GIT_VAULT_DIR=".git-vault"
-STORAGE_DIR="$TARGET_GIT_VAULT_DIR/storage"
-TARGET_MANIFEST="$TARGET_GIT_VAULT_DIR/paths.list"
-LFS_CONFIG_FILE="$TARGET_GIT_VAULT_DIR/lfs-config"
-GIT_DIR=$(git -C "$TARGET_REPO_ROOT" rev-parse --git-dir) # Usually .git, but could be elsewhere
-
-# Check for custom hooks path
-CUSTOM_HOOKS_PATH=$(git -C "$TARGET_REPO_ROOT" config --get core.hooksPath 2>/dev/null || echo "")
-if [ -n "$CUSTOM_HOOKS_PATH" ]; then
-  # If relative path, make it relative to the repository root
-  case "$CUSTOM_HOOKS_PATH" in
-    /*) # Absolute path
-      HOOKS_DIR="$CUSTOM_HOOKS_PATH"
-      ;;
-    *)  # Relative path (to repo root)
-      HOOKS_DIR="$TARGET_REPO_ROOT/$CUSTOM_HOOKS_PATH"
-      ;;
-  esac
-  echo "Using custom hooks directory: $HOOKS_DIR"
-else
-  # Default hooks directory
-  HOOKS_DIR="$GIT_DIR/hooks"
-  echo "Using default hooks directory: $HOOKS_DIR"
-fi
-
-TARGET_GIT_VAULT_DIR_REL=".git-vault" # Relative path to vault scripts from repo root
-
-# Define source script paths (relative to the location of install.sh)
-SOURCE_SCRIPT_DIR=$(dirname "$0") # Assumes install.sh location
-
-# --- Ensure Directories and Files Exist ---
-echo "Ensuring required directories and files exist in target repo..."
-mkdir -p "$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR" "$TARGET_REPO_ROOT/$STORAGE_DIR" "$HOOKS_DIR"
-
-# --- 1Password Configuration ---
-echo "Checking for 1Password CLI..."
-if command -v op >/dev/null 2>&1; then
-  echo "1Password CLI 'op' detected."
-  printf "Would you like to use 1Password for password storage instead of local files? [y/N]: "
-  read -r use_1password_response || true # Add || true to handle potential read errors
-  echo # Add newline after read
-
-  if [ "$use_1password_response" = "y" ] || [ "$use_1password_response" = "Y" ]; then
-    echo "Checking 1Password sign-in status..."
-    if ! check_op_status; then
-      echo "Error: Cannot proceed with 1Password setup due to sign-in issues." >&2
-      echo "Please sign in using 'op signin' and run the installation again." >&2
-      exit 1
-    fi
-    echo "Sign-in status verified."
-    USE_1PASSWORD=true
-    STORAGE_MODE="1password"
-
-    # Ask for vault name
-    current_project_name=$(basename "$TARGET_REPO_ROOT") # Simple basename during install
-    printf "Enter the 1Password vault name for project '%s' secrets (leave blank for '%s'): " "$current_project_name" "$OP_VAULT_NAME"
-    read -r user_vault_name || true
-    echo # Add newline after read
-
-    if [ -n "$user_vault_name" ]; then
-      OP_VAULT_NAME="$user_vault_name"
-    fi
-    echo "Using 1Password vault: '$OP_VAULT_NAME'"
-
-    # Save vault name configuration
-    echo "$OP_VAULT_NAME" > "$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/1password-vault"
-    echo "1Password vault name saved to '$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/1password-vault'"
-  else
-    echo "Using file-based password storage."
-    STORAGE_MODE="file"
-  fi
-else
-  echo "1Password CLI 'op' not detected. Using default file-based password storage."
-  STORAGE_MODE="file"
-fi
-
-# Save storage mode configuration
-echo "$STORAGE_MODE" > "$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/storage-mode"
-echo "Storage mode ('$STORAGE_MODE') saved to '$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/storage-mode'"
-
-# --- Install Script Files ---
-echo "Installing git-vault scripts into target '$TARGET_GIT_VAULT_DIR/'..."
-
-# Create paths.list file from embedded content if it doesn't exist
-if [ ! -f "$TARGET_REPO_ROOT/$TARGET_MANIFEST" ]; then
-  echo "Creating paths.list manifest file from embedded template..."
-  echo "$EMBEDDED_PATHS_LIST" > "$TARGET_REPO_ROOT/$TARGET_MANIFEST"
-fi
-
-# Install script files, either from local copies or GitHub release
-# Include utils.sh now
-SCRIPT_FILES="add.sh remove.sh encrypt.sh decrypt.sh utils.sh"
-for script in $SCRIPT_FILES; do
-  # Try local file first, then download from GitHub if needed
-  if ! download_or_use_local "$script" "$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/$script" "$SOURCE_SCRIPT_DIR"; then
-    echo "Failed to install $script"
-    exit 1
-  fi
-  # Make sure the script is executable
-  chmod +x "$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR/$script"
-done
-
-# --- Update .gitignore ---
-echo "Updating .gitignore..."
-GITIGNORE_FILE="$TARGET_REPO_ROOT/.gitignore"
-PW_IGNORE_PATTERN="$TARGET_GIT_VAULT_DIR_REL/*.pw"
-PW_1P_IGNORE_PATTERN="$TARGET_GIT_VAULT_DIR_REL/*.pw.1p" # Ignore 1Password marker files
-# Add .gitignore if it doesn't exist
-touch "$GITIGNORE_FILE"
-
-# Add password file ignore pattern if not present
-if ! grep -qxF "$PW_IGNORE_PATTERN" "$GITIGNORE_FILE"; then
-    echo "Adding '$PW_IGNORE_PATTERN' to $GITIGNORE_FILE"
-    printf "\n# Git-Vault password files (DO NOT COMMIT)\n%s\n" "$PW_IGNORE_PATTERN" >> "$GITIGNORE_FILE"
-fi
-
-# Add 1Password marker file ignore pattern if not present and using 1password mode
-if [ "$STORAGE_MODE" = "1password" ] && ! grep -qxF "$PW_1P_IGNORE_PATTERN" "$GITIGNORE_FILE"; then
-    echo "Adding '$PW_1P_IGNORE_PATTERN' to $GITIGNORE_FILE"
-    printf "# Git-Vault 1Password marker files (DO NOT COMMIT)\n%s\n" "$PW_1P_IGNORE_PATTERN" >> "$GITIGNORE_FILE"
-fi
-
-# Ensure storage/ directory is properly tracked
-STORAGE_DIR_REL="$TARGET_GIT_VAULT_DIR_REL/storage"  # Update to use new storage dir path
-if grep -q "^$STORAGE_DIR_REL" "$GITIGNORE_FILE"; then
-    echo "WARNING: '$STORAGE_DIR_REL/' is ignored in .gitignore but MUST be tracked."
-    echo "        Please modify your .gitignore to ensure '$STORAGE_DIR_REL/' is not ignored."
-fi
-
-# --- Git LFS Setup ---
-echo "Checking for Git LFS support..."
-# Save the LFS threshold to config file for use by other scripts
-echo "$LFS_THRESHOLD" > "$TARGET_REPO_ROOT/$LFS_CONFIG_FILE"
-echo "LFS threshold set to ${LFS_THRESHOLD}MB (stored in $LFS_CONFIG_FILE)"
-
-# Check if git-lfs is available
-if command -v git-lfs >/dev/null 2>&1; then
-  echo "Git LFS detected. Setting up LFS for git-vault..."
-
-  # Initialize Git LFS in the repository if not already done
-  if ! git -C "$TARGET_REPO_ROOT" lfs version >/dev/null 2>&1; then
-    git -C "$TARGET_REPO_ROOT" lfs install --local
-    echo "Git LFS initialized in the repository."
-  else
-    echo "Git LFS already initialized in the repository."
-  fi
-
-  # Create a .gitattributes file if it doesn't exist
-  GITATTRIBUTES_FILE="$TARGET_REPO_ROOT/.gitattributes"
-  touch "$GITATTRIBUTES_FILE"
-
-  # Add the LFS tracking pattern for archives
-  LFS_PATTERN="$STORAGE_DIR_REL/*.tar.gz.gpg filter=lfs diff=lfs merge=lfs -text"
-  if ! grep -qxF "$LFS_PATTERN" "$GITATTRIBUTES_FILE"; then
-    echo "# Git-Vault LFS tracking for large encrypted archives" >> "$GITATTRIBUTES_FILE"
-    echo "$LFS_PATTERN" >> "$GITATTRIBUTES_FILE"
-    echo "Added LFS tracking for encrypted archives to .gitattributes"
-
-    # Stage .gitattributes for commit
-    git -C "$TARGET_REPO_ROOT" add "$GITATTRIBUTES_FILE" > /dev/null 2>&1 || true
-  else
-    echo "LFS tracking for git-vault archives already configured in .gitattributes"
-  fi
-else
-  echo "Git LFS not detected. Large files will be stored directly in Git."
-  echo "To use Git LFS for improved handling of large archives:"
-  echo "  1. Install Git LFS (https://git-lfs.github.com/)"
-  echo "  2. Run: git lfs install"
-  echo "  3. Reinstall git-vault to enable LFS integration"
-fi
-
-# --- Git Hook Installation Function ---
-install_hook() {
-  local hook_name="$1" # e.g., pre-commit
-  local script_name="$2" # e.g., encrypt.sh
-  local hook_path="$HOOKS_DIR/$hook_name"
-
-  # Calculate the relative path from the hooks directory to the git-vault scripts
-  # This is more complex for custom hook paths
-  local hooks_to_repo_root=""
-
-  # For default hooks in .git/hooks, it's typically "../.."
-  # For custom hooks in .githooks, it's typically ""
-  if [ "$HOOKS_DIR" = "$GIT_DIR/hooks" ]; then
-    # Default hooks location (.git/hooks) - need to go up to repo root
-    hooks_to_repo_root="../.."
-  elif [ "$HOOKS_DIR" = "$TARGET_REPO_ROOT/.githooks" ]; then
-    # Custom hooks at repository level - already at repo root
-    hooks_to_repo_root="."
-  else
-    # For other custom locations, calculate relative path
-    # This is a simplification and might need more robust path calculation
-    hooks_to_repo_root="."
-  fi
-
-  # Use absolute path for better reliability, especially in test environments
-  local hook_script_path="$TARGET_REPO_ROOT/$TARGET_GIT_VAULT_DIR_REL/$script_name"
-  local marker="# git-vault hook marker"
-
-  echo " - Processing $hook_name hook..."
-  echo "   Hook script path will be: $hook_script_path"
-
-  if [ -f "$hook_path" ]; then
-    # Hook exists
-    if grep -Fxq "$marker" "$hook_path"; then
-      # Marker found, check if command is already correct
-      # Note: Simple grep check; might not handle complex existing scripts perfectly.
-      if grep -Fq "$hook_script_path" "$hook_path"; then
-         echo "   git-vault command already present and marked in $hook_name."
-         chmod +x "$hook_path" # Ensure executable
-         return 0
+  # Detect architecture
+  case "$(uname -m)" in
+    x86_64|amd64) arch="x64";;
+    arm64|aarch64)
+      if [ "$os" = "macos" ]; then
+        os="macos-arm"
+        arch="arm64"
       else
-         echo "   WARN: Found git-vault marker in '$hook_path' but the script command seems different or missing."
-         echo "   Expected command similar to: $hook_script_path \"\$@\""
-         echo "   Please inspect '$hook_path' manually. Skipping update."
-         return 1 # Indicate potential issue
+        arch="arm64"
+      fi
+      ;;
+    *)       error "Unsupported architecture: $(uname -m)";;
+  esac
+
+  echo "$os"
+}
+
+# Check if a command exists
+command_exists() {
+  command -v "$1" &> /dev/null
+}
+
+# Check required dependencies
+check_dependencies() {
+  # Check for unzip or similar tools
+  if ! command_exists unzip; then
+    warning "unzip not found, will try to use alternative methods for extraction"
+  fi
+
+  # Check for git
+  if ! command_exists git; then
+    error "git is required for git-vault to function"
+  fi
+
+  # Check for gpg
+  if ! command_exists gpg; then
+    warning "gpg not found, will be required for git-vault to function properly"
+  fi
+}
+
+# Download a file
+download_file() {
+  local url="$1"
+  local output_file="$2"
+
+  info "Downloading from $url"
+
+  if command_exists curl; then
+    curl -sSL "$url" -o "$output_file"
+  elif command_exists wget; then
+    wget -q "$url" -O "$output_file"
+  else
+    error "Neither curl nor wget found"
+  fi
+}
+
+# Get the latest release version
+get_latest_version() {
+  local api_url="${REPO_API_URL}/releases/latest"
+  local version
+
+  if command_exists curl; then
+    version=$(curl -sSL $api_url | grep '"tag_name":' | cut -d'"' -f4)
+  elif command_exists wget; then
+    version=$(wget -q -O - $api_url | grep '"tag_name":' | cut -d'"' -f4)
+  fi
+
+  if [ -z "$version" ]; then
+    error "Failed to determine latest version"
+  fi
+
+  echo "$version"
+}
+
+# Extract zip file
+extract_zip() {
+  local zip_file="$1"
+  local extract_dir="$2"
+
+  info "Extracting to $extract_dir"
+
+  if command_exists unzip; then
+    unzip -qo "$zip_file" -d "$extract_dir"
+  else
+    # Try with Python if available
+    if command_exists python3; then
+      python3 -m zipfile -e "$zip_file" "$extract_dir"
+    elif command_exists python; then
+      python -m zipfile -e "$zip_file" "$extract_dir"
+    else
+      error "No method available to extract zip files"
+    fi
+  fi
+}
+
+# Create temp directory
+create_temp_dir() {
+  if command_exists mktemp; then
+    mktemp -d -t git-vault-XXXXXXXXXX
+  else
+    local temp_dir="/tmp/git-vault-$(date +%s)"
+    mkdir -p "$temp_dir"
+    echo "$temp_dir"
+  fi
+}
+
+# Clean up temporary files
+cleanup() {
+  if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
+    info "Cleaning up temporary files"
+    rm -rf "$TEMP_DIR"
+  fi
+}
+
+# Check if git-vault is installed and get its version
+check_installed_version() {
+  if command_exists gv; then
+    local current_version
+    current_version=$(gv version 2>/dev/null | grep -o 'v[0-9]*\.[0-9]*\.[0-9]*' || echo "unknown")
+    if [ "$current_version" != "unknown" ]; then
+      echo "$current_version"
+      return 0
+    fi
+  elif command_exists git-vault; then
+    local current_version
+    current_version=$(git-vault version 2>/dev/null | grep -o 'v[0-9]*\.[0-9]*\.[0-9]*' || echo "unknown")
+    if [ "$current_version" != "unknown" ]; then
+      echo "$current_version"
+      return 0
+    fi
+  fi
+  echo ""
+  return 1
+}
+
+# Download and run the git-vault binary
+download_and_run() {
+  local platform="$1"
+  local version="$2"
+  local extra_args="$3"
+  local local_zip="$4"
+
+  # Create temp directory
+  TEMP_DIR=$(create_temp_dir)
+  trap cleanup EXIT
+
+  local zip_path="${TEMP_DIR}/gv.zip"
+
+  if [ -n "$local_zip" ]; then
+    # Use local zip file
+    info "Using local zip file: $local_zip"
+    if [ ! -f "$local_zip" ]; then
+      error "Local zip file does not exist: $local_zip"
+    fi
+    cp "$local_zip" "$zip_path"
+  else
+    # Determine the zip file name based on platform
+    local zip_file_name
+    case "$platform" in
+      linux)
+        zip_file_name="gv-linux.zip"
+        ;;
+      macos)
+        zip_file_name="gv-macos.zip"
+        ;;
+      macos-arm)
+        zip_file_name="gv-macos-arm.zip"
+        ;;
+      windows)
+        zip_file_name="gv-windows.zip"
+        ;;
+      *)
+        error "Unsupported platform: $platform"
+        ;;
+    esac
+
+    local download_url="${REPO_URL}/releases/download/${version}/${zip_file_name}"
+
+    # Download the zip file
+    download_file "$download_url" "$zip_path"
+  fi
+
+  # Extract the zip file
+  extract_zip "$zip_path" "$TEMP_DIR"
+
+  # Find the executable
+  local executable
+  if [ "$platform" = "windows" ]; then
+    executable="gv.exe"
+  else
+    executable="gv"
+  fi
+
+  # Make the executable executable
+  chmod +x "$TEMP_DIR/$executable"
+
+  # Run the installation
+  info "Running git-vault installer..."
+
+  # Just run the installer and pass the current directory to it
+  # The installer will interactively handle global vs. local installation
+  "$TEMP_DIR/$executable" install "$(pwd)" $extra_args
+}
+
+# Uninstall git-vault
+uninstall_git_vault() {
+  local cwd="$(pwd)"
+  info "Uninstalling git-vault..."
+
+  # Remove local installation
+  if [ -d "$cwd/.vault" ]; then
+    info "Removing git-vault from current repository"
+
+    # Remove git hooks
+    if [ -d "$cwd/.git/hooks" ]; then
+      for hook in "pre-commit" "post-checkout" "post-merge"; do
+        local hook_path="$cwd/.git/hooks/$hook"
+        if [ -f "$hook_path" ] && grep -q "git-vault" "$hook_path"; then
+          info "Removing git-vault hook: $hook"
+          rm -f "$hook_path"
+        fi
+      done
+    fi
+
+    # Remove .vault directory
+    rm -rf "$cwd/.vault"
+
+    # Remove lines from .gitignore
+    if [ -f "$cwd/.gitignore" ]; then
+      info "Updating .gitignore"
+      sed -i.bak '/^\.vault\//d' "$cwd/.gitignore"
+      sed -i.bak '/git-vault/d' "$cwd/.gitignore"
+      rm -f "$cwd/.gitignore.bak"
+    fi
+
+    # Remove lines from .gitattributes if it exists
+    if [ -f "$cwd/.gitattributes" ]; then
+      info "Updating .gitattributes"
+      sed -i.bak '/# Git-Vault LFS tracking/d' "$cwd/.gitattributes"
+      sed -i.bak '/\.vault\/storage/d' "$cwd/.gitattributes"
+      rm -f "$cwd/.gitattributes.bak"
+    fi
+
+    success "Local git-vault installation removed"
+  else
+    warning "No git-vault installation found in current repository"
+  fi
+
+  # Check for global installation
+  local global_gv=""
+  if command_exists gv; then
+    global_gv=$(which gv)
+  fi
+
+  if [ -n "$global_gv" ]; then
+    local confirm
+    read -p "Do you want to remove global gv installation at $global_gv? (y/n) " confirm
+
+    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+      info "Removing global gv installation"
+
+      # Remove executable
+      rm -f "$global_gv"
+
+      # Remove git-vault alias if it exists
+      if command_exists git-vault; then
+        local git_vault_path=$(which git-vault)
+        rm -f "$git_vault_path"
+        info "Removed git-vault alias from $git_vault_path"
+      fi
+
+      success "Global gv installation removed"
+    fi
+  else
+    info "No global gv installation found"
+  fi
+}
+
+# Parse command line arguments
+parse_args() {
+  # Default values
+  SHOULD_UNINSTALL=false
+  SPECIFIED_VERSION=""
+  EXTRA_ARGS=""
+  LOCAL_ZIP=""
+
+  # Parse arguments
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --version|-V)
+        SPECIFIED_VERSION="$2"
+        shift 2
+        ;;
+      --uninstall|-u)
+        SHOULD_UNINSTALL=true
+        shift
+        ;;
+      --help|-h)
+        print_help
+        exit 0
+        ;;
+      --global|-g)
+        # Just pass the --global flag to the binary if specified
+        EXTRA_ARGS="--global"
+        shift
+        ;;
+      --local-zip)
+        LOCAL_ZIP="$2"
+        shift 2
+        ;;
+      *)
+        warning "Unknown option: $1"
+        shift
+        ;;
+    esac
+  done
+}
+
+# Print help message
+print_help() {
+  echo "git-vault installer"
+  echo ""
+  echo "Usage: ./install.sh [options]"
+  echo ""
+  echo "Options:"
+  echo "  --version, -V VERSION  Install specific version (e.g., v0.1.0)"
+  echo "  --uninstall, -u        Uninstall git-vault"
+  echo "  --local-zip PATH       Use local zip file (for testing)"
+  echo "  --help, -h             Show this help message"
+  echo ""
+  echo "Description:"
+  echo "  This script downloads and installs git-vault, a tool for securely"
+  echo "  storing sensitive files in Git repositories using GPG encryption."
+  echo ""
+  echo "Examples:"
+  echo "  ./install.sh                         # Install git-vault"
+  echo "  ./install.sh --version v0.1.0        # Install specific version"
+  echo "  ./install.sh --uninstall             # Remove git-vault"
+  echo "  ./install.sh --local-zip ./path.zip  # Use local zip file"
+}
+
+# Main function
+main() {
+  # Parse arguments
+  parse_args "$@"
+
+  # Handle uninstall if requested
+  if [ "$SHOULD_UNINSTALL" = "true" ]; then
+    uninstall_git_vault
+    exit 0
+  fi
+
+  info "Starting gv installation"
+
+  # Check dependencies
+  check_dependencies
+
+  # Detect platform
+  PLATFORM=$(detect_platform)
+  info "Detected platform: $PLATFORM"
+
+  # Get version to install (specified or latest)
+  VERSION="$SPECIFIED_VERSION"
+  if [ -z "$VERSION" ] && [ -z "$LOCAL_ZIP" ]; then
+    VERSION=$(get_latest_version)
+    info "Latest version: $VERSION"
+  elif [ -n "$SPECIFIED_VERSION" ]; then
+    info "Installing specified version: $VERSION"
+  fi
+
+  # Check if git-vault is already installed
+  CURRENT_VERSION=$(check_installed_version)
+  if [ -n "$CURRENT_VERSION" ] && [ -z "$LOCAL_ZIP" ]; then
+    info "Found existing gv installation: $CURRENT_VERSION"
+
+    # Compare versions
+    compare_versions "$VERSION" "$CURRENT_VERSION"
+    COMP_RESULT=$?
+
+    if [ $COMP_RESULT -eq 2 ]; then
+      info "Current version is the same as target version"
+      read -p "Do you want to reinstall gv $CURRENT_VERSION? (y/n) " REINSTALL
+      if [ "$REINSTALL" != "y" ] && [ "$REINSTALL" != "Y" ]; then
+        info "Installation cancelled"
+        exit 0
+      fi
+    elif [ $COMP_RESULT -eq 1 ]; then
+      warning "Target version ($VERSION) is older than current version ($CURRENT_VERSION)"
+      read -p "Do you want to downgrade to $VERSION? (y/n) " DOWNGRADE
+      if [ "$DOWNGRADE" != "y" ] && [ "$DOWNGRADE" != "Y" ]; then
+        info "Installation cancelled"
+        exit 0
       fi
     else
-      # Hook exists but no marker - append safely
-      echo "   Existing $hook_name hook found without git-vault marker. Appending git-vault command."
-      # Backup existing hook
-      local backup_file="$hook_path.bak.$(date +%s)"
-      cp "$hook_path" "$backup_file"
-      echo "   Backup created at $backup_file"
-      # Append marker and command
-      printf "\n%s\n%s \"%s\"\n" "$marker" "$hook_script_path" '$@' >> "$hook_path"
-      chmod +x "$hook_path"
-      echo "   Appended git-vault command to $hook_name."
+      info "A newer version ($VERSION) is available"
+      read -p "Do you want to upgrade from $CURRENT_VERSION to $VERSION? (y/n) " UPGRADE
+      if [ "$UPGRADE" != "y" ] && [ "$UPGRADE" != "Y" ]; then
+        info "Installation cancelled"
+        exit 0
+      fi
     fi
-  else
-    # Hook doesn't exist, create it
-    echo "   Creating $hook_name hook at $hook_path."
-    # Use /bin/sh for broader compatibility in hooks
-    printf "#!/bin/sh\n\n%s\n\n# Execute the git-vault script\nexec %s \"%s\"\n" "$marker" "$hook_script_path" '$@' > "$hook_path"
-    chmod +x "$hook_path"
-    echo "   Created $hook_path."
   fi
-  return 0
+
+  # Download and run git-vault
+  download_and_run "$PLATFORM" "$VERSION" "$EXTRA_ARGS" "$LOCAL_ZIP"
+
+  success "gv installation completed!"
 }
 
-# --- Install Hooks ---
-echo "Installing/updating Git hooks..."
-install_hook "pre-commit" "encrypt.sh"
-install_hook "post-checkout" "decrypt.sh"
-install_hook "post-merge" "decrypt.sh"
-echo "Hook installation complete."
-
-# --- Print Usage Instructions ---
-echo ""
-echo "Git-Vault installation complete."
-echo "Storage mode set to: $STORAGE_MODE"
-if [ "$STORAGE_MODE" = "1password" ]; then
-  echo "Using 1Password vault: '$OP_VAULT_NAME'"
-fi
-echo "Usage:"
-echo "  Add a path:    $TARGET_GIT_VAULT_DIR_REL/add.sh <relative-path-to-file-or-dir>"
-echo "  Remove a path: $TARGET_GIT_VAULT_DIR_REL/remove.sh <relative-path-to-file-or-dir>"
-echo ""
-if command -v git-lfs >/dev/null 2>&1; then
-  echo "Git LFS is configured with a threshold of ${LFS_THRESHOLD}MB."
-  echo "Archives larger than this size will be managed by Git LFS automatically."
-else
-  echo "Git LFS is not available. Install Git LFS for better management of large archives."
-fi
-echo ""
-echo "Remember to commit changes to .gitignore and the $TARGET_GIT_VAULT_DIR_REL/ directory."
-
-exit 0
+# Execute main function
+main "$@"
