@@ -4,12 +4,33 @@
 # This script downloads and installs git-vault, a tool for securely
 # storing sensitive files in Git repositories using GPG encryption.
 
+# Enable debugging - uncomment to see detailed execution
+# set -x
+
+# Exit on error
+set -e
+
+# Trap errors to ensure we show useful information
+trap 'last_command=$current_command; current_command=$BASH_COMMAND' DEBUG
+trap 'echo "ERROR: Command \"${last_command}\" failed with exit code $? at line ${LINENO}"' ERR
+
 # GitHub repository configuration
 REPO_OWNER="zackiles"
 REPO_NAME="git-vault"
 REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}"
 REPO_API_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}"
 RAW_CONTENT_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main"
+
+# Detect if we're being piped through curl
+if [ -t 1 ]; then
+  # Terminal is interactive
+  INTERACTIVE=true
+else
+  # We're being piped (e.g., through curl)
+  INTERACTIVE=false
+  # Ensure stderr is redirected to stdout so errors appear
+  exec 2>&1
+fi
 
 # Usage:
 #   ./install.sh                   # Download and run the installer
@@ -22,8 +43,6 @@ RAW_CONTENT_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/ma
 #
 # Install specific version:
 #   curl -fsSL ${RAW_CONTENT_URL}/install.sh | bash -s -- --version v0.1.0
-
-set -e
 
 # Colors for output
 RED='\033[0;31m'
@@ -138,13 +157,18 @@ download_file() {
   local output_file="$2"
 
   info "Downloading from $url"
+  echo "DEBUG: Starting download from $url to $output_file"
 
   local http_code
   if command_exists curl; then
     # Use curl with -w to get the HTTP status code and -f to fail on HTTP errors
-    http_code=$(curl -w '%{http_code}' -sSL "$url" -o "$output_file" || echo "000")
+    echo "DEBUG: Using curl to download"
+    # Make curl less silent so we can see what's happening
+    http_code=$(curl -v -w '%{http_code}' -fL "$url" -o "$output_file" 2>&1 || echo "000")
+    echo "DEBUG: Curl download completed with status: $http_code"
     case "$http_code" in
       200)
+        echo "DEBUG: Download successful"
         ;;
       404)
         error "Release asset not found at $url (HTTP 404). This could mean:
@@ -167,6 +191,7 @@ Please check ${REPO_URL}/releases or try again later."
         ;;
     esac
   elif command_exists wget; then
+    echo "DEBUG: Using wget to download"
     if ! wget -q --server-response "$url" -O "$output_file" 2>&1 | grep -q '200 OK'; then
       error "Failed to download file from $url.
 Please check ${REPO_URL}/releases for available assets."
@@ -182,6 +207,8 @@ Please check ${REPO_URL}/releases for available assets."
   2. The download was interrupted
 Please try again or check ${REPO_URL}/releases for issues."
   fi
+
+  echo "DEBUG: Download file check passed: $(ls -la "$output_file")"
 }
 
 # Get the latest release version
@@ -292,8 +319,13 @@ download_and_run() {
   local extra_args="$3"
   local local_zip="$4"
 
+  # Debug output to see if we get this far
+  echo "DEBUG: Entering download_and_run function"
+  echo "DEBUG: Platform: $platform, Version: $version"
+
   # Create temp directory
   TEMP_DIR=$(create_temp_dir)
+  echo "DEBUG: Created temp directory: $TEMP_DIR"
   trap cleanup EXIT
 
   local zip_path="${TEMP_DIR}/gv.zip"
@@ -327,21 +359,35 @@ download_and_run() {
     esac
 
     local download_url="${REPO_URL}/releases/download/${version}/${zip_file_name}"
+    echo "DEBUG: Will attempt to download from: $download_url"
+
+    # Manually check if the release asset exists
+    echo "DEBUG: Checking if release asset exists..."
+    local asset_check_url="${download_url}"
+    local http_code
+
+    if command_exists curl; then
+      http_code=$(curl -w '%{http_code}' -Isf "$asset_check_url" -o /dev/null || echo "000")
+      echo "DEBUG: HTTP status code for asset: $http_code"
+      if [ "$http_code" != "200" ]; then
+        error "Release asset not found: $download_url (HTTP $http_code)
+Please check ${REPO_URL}/releases for available assets."
+      fi
+    fi
 
     # Check if the release exists before attempting download
     local release_url="${REPO_API_URL}/releases/tags/${version}"
+    echo "DEBUG: Checking if release exists: $release_url"
     if command_exists curl; then
-      if ! curl -sSL -f "$release_url" > /dev/null 2>&1; then
-        error "Release ${version} not found at ${REPO_URL}/releases
-This could mean:
-  1. The release is still being created
-  2. The release was deleted
-  3. The release tag is incorrect
+      http_code=$(curl -w '%{http_code}' -Isf "$release_url" -o /dev/null || echo "000")
+      echo "DEBUG: HTTP status code for release: $http_code"
+      if [ "$http_code" != "200" ]; then
+        error "Release ${version} not found (HTTP $http_code).
 Please check ${REPO_URL}/releases for available versions."
       fi
     elif command_exists wget; then
       if ! wget -q --spider "$release_url" 2>/dev/null; then
-        error "Release ${version} not found at ${REPO_URL}/releases
+        error "Release ${version} not found.
 Please check ${REPO_URL}/releases for available versions."
       fi
     fi
@@ -371,8 +417,19 @@ Please check ${REPO_URL}/releases for available versions."
       ;;
   esac
 
+  echo "DEBUG: Will look for executable: $executable after extraction"
+
   # Extract the zip file
   extract_zip "$zip_path" "$TEMP_DIR"
+
+  echo "DEBUG: Extraction completed"
+
+  # Check if the executable actually exists
+  if [ ! -f "$TEMP_DIR/$executable" ]; then
+    echo "DEBUG: Listing files in temp dir:"
+    ls -la "$TEMP_DIR"
+    error "Executable not found after extraction: $executable"
+  fi
 
   # Make the executable executable
   chmod +x "$TEMP_DIR/$executable" || error "Failed to make $executable executable"
@@ -380,6 +437,7 @@ Please check ${REPO_URL}/releases for available versions."
   # Run the installation
   info "Running git-vault installer..."
 
+  echo "DEBUG: About to execute: $TEMP_DIR/$executable install $(pwd) $extra_args"
   # Just run the installer and pass the current directory to it
   # The installer will interactively handle global vs. local installation
   if ! "$TEMP_DIR/$executable" install "$(pwd)" $extra_args; then
@@ -526,6 +584,9 @@ print_help() {
 
 # Main function
 main() {
+  # DEBUG: Print arguments
+  echo "DEBUG: Script arguments: $@"
+
   # Parse arguments
   parse_args "$@"
 
@@ -553,6 +614,7 @@ main() {
     info "Installing specified version: $VERSION"
   fi
 
+  echo "DEBUG: About to check for existing gv installation"
   # Check if git-vault is already installed
   CURRENT_VERSION=$(check_installed_version)
   if [ -n "$CURRENT_VERSION" ] && [ -z "$LOCAL_ZIP" ]; then
@@ -586,6 +648,7 @@ main() {
     fi
   fi
 
+  echo "DEBUG: About to download and run"
   # Download and run git-vault
   download_and_run "$PLATFORM" "$VERSION" "$EXTRA_ARGS" "$LOCAL_ZIP"
 
