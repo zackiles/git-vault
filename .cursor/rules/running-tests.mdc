@@ -1,0 +1,7 @@
+---
+description: How to run the tests
+globs:
+alwaysApply: false
+---
+- Use to the command `deno task test` to run the tests
+- NEVER use `deno test...`, instead use the deno task!

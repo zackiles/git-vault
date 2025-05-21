@@ -1,4 +1,5 @@
 # Manually add these to the context don't index so it doesn't confuse the AI Agent
 docs/
+bin/
 # Don't index it, add it manually. If it gets out of date it will confuse the AI agent
 .ai/context/codebase-summary.xml

@@ -1,0 +1,82 @@
+{
+  "name": "@zackiles/git-vault",
+  "version": "0.0.4",
+  "description": "Drop-dead simple solution for sharing sensitive things in git repositories.",
+  "tasks": {
+    "dev": "DENO_ENV=development deno run -A src/cli.ts",
+    "test": "DENO_ENV=test deno run -A scripts/test.ts",
+    "test:integration": "DENO_ENV=test RUN_INTEGRATION_TESTS=true deno run -A scripts/test.ts",
+    "check": "deno lint && deno check src/cli.ts",
+    "tag": "deno run -A scripts/tag.ts",
+    "pre-publish": "deno run -A scripts/pre-publish.ts",
+    "serve-docs": "deno run -A scripts/serve-docs.ts",
+    "build": "deno run -A scripts/build.ts",
+    "build:context": "deno run -A scripts/build-context.ts"
+  },
+  "unstable": [
+    "kv",
+    "net",
+    "http",
+    "fs",
+    "ffi",
+    "cron",
+    "temporal",
+    "webgpu",
+    "unsafe-proto",
+    "webgpu"
+  ],
+  "imports": {
+    "@std/async": "jsr:@std/async@1",
+    "@std/crypto": "jsr:@std/crypto@^1.0.5",
+    "@std/dotenv": "jsr:@std/dotenv@^0.225.3",
+    "@std/encoding": "jsr:@std/encoding@^1.0.10",
+    "@std/fmt": "jsr:@std/fmt@^1.0.8",
+    "@std/fs": "jsr:@std/fs@^1.0.17",
+    "@std/http": "jsr:@std/http@1",
+    "@std/jsonc": "jsr:@std/jsonc@1",
+    "@std/net": "jsr:@std/net@^1.0.4",
+    "@std/path": "jsr:@std/path@1",
+    "@std/assert": "jsr:@std/assert@1",
+    "@std/cli": "jsr:@std/cli@1",
+    "@qnighy/dedent": "jsr:@qnighy/dedent@^0.1.2",
+    "@std/semver": "jsr:@std/semver@1",
+    "@std/streams": "jsr:@std/streams@^1.0.9",
+    "@std/testing": "jsr:@std/testing@1",
+    "@std/text": "jsr:@std/text@^1.0.13",
+    "@valibot/valibot": "jsr:@valibot/valibot@^1.1.0",
+    "@zip-js/zip-js": "jsr:@zip-js/zip-js@^2.7.62"
+  },
+  "lint": {
+    "include": [
+      "deno.jsonc",
+      "src/**/*.ts",
+      "scripts/**/*.ts",
+      "test/**/*.ts",
+      "*.md"
+    ],
+    "exclude": [
+     "test/mocks/**/**"
+    ]
+  },
+  "fmt": {
+    "lineWidth": 100,
+    "useTabs": false,
+    "indentWidth": 2,
+    "singleQuote": true,
+    "proseWrap": "preserve",
+    "semiColons": false,
+    "include": [
+      "deno.jsonc",
+      "src/**/*.ts",
+      "scripts/**/*.ts",
+      "test/**/*.ts",
+      "*.md"
+    ],
+    "exclude": [
+      "test/mocks/**/**"
+    ]
+  },
+  "exports": {
+    ".": "./src/cli.ts"
+  }
+}

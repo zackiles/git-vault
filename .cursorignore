@@ -1,2 +1,5 @@
 # Let Cursor see it, because it's ignored by .gitignore
 !ai/context/codebase-summary.xml
+
+# Let sure see it but don't index it
+!bin/

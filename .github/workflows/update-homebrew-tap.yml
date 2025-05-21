@@ -1,0 +1,137 @@
+name: Update Homebrew Tap
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types:
+      - completed
+
+jobs:
+  update-homebrew-tap:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    env:
+      TAP_REPO: zackiles/homebrew-git-vault
+      FORMULA_PATH: Formula/git-vault.rb
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get release info
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get the latest release
+          RELEASE_INFO=$(gh release list --limit 1)
+          TAG=$(echo "$RELEASE_INFO" | awk '{print $1}')
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+          VERSION="${TAG#v}"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download release artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p dist
+
+          # Download the pre-built tar.gz files
+          gh release download ${{ steps.release.outputs.TAG }} -p "gv-macos.tar.gz" -D dist/
+          gh release download ${{ steps.release.outputs.TAG }} -p "gv-macos-arm.tar.gz" -D dist/
+          gh release download ${{ steps.release.outputs.TAG }} -p "gv-linux.tar.gz" -D dist/
+          gh release download ${{ steps.release.outputs.TAG }} -p "gv-linux-arm.tar.gz" -D dist/
+
+          # Rename to match Homebrew conventions
+          mv dist/gv-macos.tar.gz dist/git-vault-macos.tar.gz
+          mv dist/gv-macos-arm.tar.gz dist/git-vault-macos-arm64.tar.gz
+          mv dist/gv-linux.tar.gz dist/git-vault-linux.tar.gz
+          mv dist/gv-linux-arm.tar.gz dist/git-vault-linux-arm64.tar.gz
+
+      - name: Compute SHA256 hashes
+        id: shasums
+        run: |
+          MAC_INTEL_SHA=$(shasum -a 256 dist/git-vault-macos.tar.gz | awk '{print $1}')
+          MAC_ARM_SHA=$(shasum -a 256 dist/git-vault-macos-arm64.tar.gz | awk '{print $1}')
+          LINUX_SHA=$(shasum -a 256 dist/git-vault-linux.tar.gz | awk '{print $1}')
+          LINUX_ARM_SHA=$(shasum -a 256 dist/git-vault-linux-arm64.tar.gz | awk '{print $1}')
+          echo "MAC_INTEL_SHA=$MAC_INTEL_SHA" >> $GITHUB_OUTPUT
+          echo "MAC_ARM_SHA=$MAC_ARM_SHA" >> $GITHUB_OUTPUT
+          echo "LINUX_SHA=$LINUX_SHA" >> $GITHUB_OUTPUT
+          echo "LINUX_ARM_SHA=$LINUX_ARM_SHA" >> $GITHUB_OUTPUT
+
+      - name: Upload tar.gz artifacts to release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=${{ steps.release.outputs.TAG }}
+          gh release upload $TAG dist/git-vault-macos.tar.gz dist/git-vault-macos-arm64.tar.gz dist/git-vault-linux.tar.gz dist/git-vault-linux-arm64.tar.gz --clobber
+
+      - name: Checkout homebrew-git-vault tap repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TAP_REPO }}
+          path: tap
+
+      - name: Generate formula
+        run: |
+          TAG=${{ steps.release.outputs.TAG }}
+          VERSION="${TAG#v}"
+          mkdir -p tap/Formula
+          cat > tap/${{ env.FORMULA_PATH }} << 'EOFORMULA'
+          class GitVault < Formula
+            desc "Drop-dead simple solution for sharing sensitive things in git repositories"
+            homepage "https://github.com/zackiles/git-vault"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/zackiles/git-vault/releases/download/${TAG}/git-vault-macos-arm64.tar.gz"
+                sha256 "${MAC_ARM_SHA}"
+              else
+                url "https://github.com/zackiles/git-vault/releases/download/${TAG}/git-vault-macos.tar.gz"
+                sha256 "${MAC_INTEL_SHA}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/zackiles/git-vault/releases/download/${TAG}/git-vault-linux-arm64.tar.gz"
+                sha256 "${LINUX_ARM_SHA}"
+              else
+                url "https://github.com/zackiles/git-vault/releases/download/${TAG}/git-vault-linux.tar.gz"
+                sha256 "${LINUX_SHA}"
+              end
+            end
+
+            def install
+              bin.install "gv" => "git-vault"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/git-vault --version")
+            end
+          end
+          EOFORMULA
+          # Replace with actual values from variables
+          sed -i "s/\${VERSION}/$VERSION/g" tap/${{ env.FORMULA_PATH }}
+          sed -i "s/\${TAG}/$TAG/g" tap/${{ env.FORMULA_PATH }}
+          sed -i "s/\${MAC_ARM_SHA}/${{ steps.shasums.outputs.MAC_ARM_SHA }}/g" tap/${{ env.FORMULA_PATH }}
+          sed -i "s/\${MAC_INTEL_SHA}/${{ steps.shasums.outputs.MAC_INTEL_SHA }}/g" tap/${{ env.FORMULA_PATH }}
+          sed -i "s/\${LINUX_SHA}/${{ steps.shasums.outputs.LINUX_SHA }}/g" tap/${{ env.FORMULA_PATH }}
+          sed -i "s/\${LINUX_ARM_SHA}/${{ steps.shasums.outputs.LINUX_ARM_SHA }}/g" tap/${{ env.FORMULA_PATH }}
+
+      - name: Commit and push updated formula
+        run: |
+          cd tap
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+          git add ${{ env.FORMULA_PATH }}
+          git commit -m "Update formula for git-vault ${{ steps.release.outputs.TAG }}"
+          git push

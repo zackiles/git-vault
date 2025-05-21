@@ -5,6 +5,7 @@ test/tmp
 docs/
 .cursor/
 .ai/
+bin/
 TODO.md
 LICENSE
 SECURITY
