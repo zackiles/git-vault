@@ -113,6 +113,7 @@ jobs:
         with:
           repository: ${{ env.TAP_REPO }}
           path: tap
+          token: ${{ secrets.TAP_REPO_TOKEN }}
 
       - name: Generate formula
         run: |
@@ -147,7 +148,7 @@ jobs:
             end
 
             def install
-              bin.install "gv" => "git-vault"
+              bin.install "gv-*" => "git-vault"
             end
 
             test do
@@ -164,6 +165,8 @@ jobs:
           sed -i "s/\${LINUX_ARM_SHA}/${{ steps.shasums.outputs.LINUX_ARM_SHA }}/g" tap/${{ env.FORMULA_PATH }}
 
       - name: Commit and push updated formula
+        env:
+          GITHUB_TOKEN: ${{ secrets.TAP_REPO_TOKEN }}
         run: |
           cd tap
           git config user.name "GitHub Action"
