@@ -41,10 +41,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Get the latest release
-          RELEASE_INFO=$(gh release list --limit 1)
-          TAG=$(echo "$RELEASE_INFO" | awk '{print $1}')
+          # Debug: List all releases
+          echo "Listing all releases:"
+          gh release list
+
+          # Get the latest release with more robust error handling
+          RELEASE_INFO=$(gh release list --limit 1 || echo "")
+          if [ -z "$RELEASE_INFO" ]; then
+            echo "No releases found. Exiting workflow."
+            exit 1
+          fi
+
+          # Debug: Print release info
+          echo "Release Info: $RELEASE_INFO"
+
+          # Get the tag directly from the GitHub CLI
+          TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName')
           echo "TAG=$TAG" >> $GITHUB_OUTPUT
+          echo "Extracted TAG: $TAG"
           VERSION="${TAG#v}"
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
@@ -53,8 +67,25 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          $TAG = "${{ steps.release.outputs.TAG }}"
+          Write-Host "Using TAG: $TAG for downloading artifacts"
+
+          if ([string]::IsNullOrEmpty($TAG)) {
+            Write-Host "Error: Empty tag detected. Cannot download release artifacts."
+            exit 1
+          }
+
           mkdir -p choco-pkg/tools
-          gh release download ${{ steps.release.outputs.TAG }} -p "gv-windows.exe.zip" -D ./choco-pkg/tools
+
+          Write-Host "Downloading gv-windows.exe.zip..."
+          gh release download $TAG -p "gv-windows.exe.zip" -D ./choco-pkg/tools
+
+          if (-not $?) {
+            Write-Host "Failed to download gv-windows.exe.zip"
+            exit 1
+          }
+
+          Write-Host "Release artifacts downloaded successfully."
 
       - name: Generate Chocolatey package files
         shell: powershell

@@ -113,7 +113,7 @@ jobs:
         with:
           repository: ${{ env.TAP_REPO }}
           path: tap
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.TAP_REPO_TOKEN }}
 
       - name: Generate formula
         run: |
@@ -179,7 +179,7 @@ jobs:
 
       - name: Commit and push updated formula
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.TAP_REPO_TOKEN }}
         run: |
           cd tap
           git config user.name "GitHub Action"
