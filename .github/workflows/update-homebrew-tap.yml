@@ -113,7 +113,7 @@ jobs:
         with:
           repository: ${{ env.TAP_REPO }}
           path: tap
-          token: ${{ secrets.TAP_REPO_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate formula
         run: |
@@ -148,7 +148,20 @@ jobs:
             end
 
             def install
-              bin.install "gv-*" => "git-vault"
+              # Install the appropriate binary based on platform
+              if Hardware::CPU.arm?
+                if OS.mac?
+                  bin.install "gv-aarch64-apple-darwin" => "git-vault"
+                else
+                  bin.install "gv-aarch64-unknown-linux-gnu" => "git-vault"
+                end
+              else
+                if OS.mac?
+                  bin.install "gv-x86_64-apple-darwin" => "git-vault"
+                else
+                  bin.install "gv-x86_64-unknown-linux-gnu" => "git-vault"
+                end
+              end
             end
 
             test do
@@ -166,7 +179,7 @@ jobs:
 
       - name: Commit and push updated formula
         env:
-          GITHUB_TOKEN: ${{ secrets.TAP_REPO_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cd tap
           git config user.name "GitHub Action"
