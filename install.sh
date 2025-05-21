@@ -143,20 +143,44 @@ download_file() {
   if command_exists curl; then
     # Use curl with -w to get the HTTP status code and -f to fail on HTTP errors
     http_code=$(curl -w '%{http_code}' -sSL "$url" -o "$output_file" || echo "000")
-    if [ "$http_code" != "200" ]; then
-      error "Failed to download file (HTTP $http_code). Please check if the release exists at $url"
-    fi
+    case "$http_code" in
+      200)
+        ;;
+      404)
+        error "Release asset not found at $url (HTTP 404). This could mean:
+  1. The release assets are still being uploaded
+  2. The release was not created properly
+  3. The asset name has changed
+Please check ${REPO_URL}/releases for available assets."
+        ;;
+      403)
+        error "Access denied when downloading from $url (HTTP 403).
+Please try again in a few minutes or check ${REPO_URL}/releases"
+        ;;
+      000)
+        error "Network error while downloading from $url.
+Please check your internet connection and try again."
+        ;;
+      *)
+        error "Failed to download file (HTTP $http_code).
+Please check ${REPO_URL}/releases or try again later."
+        ;;
+    esac
   elif command_exists wget; then
     if ! wget -q --server-response "$url" -O "$output_file" 2>&1 | grep -q '200 OK'; then
-      error "Failed to download file. Please check if the release exists at $url"
+      error "Failed to download file from $url.
+Please check ${REPO_URL}/releases for available assets."
     fi
   else
-    error "Neither curl nor wget found"
+    error "Neither curl nor wget found. Please install either curl or wget and try again."
   fi
 
   # Check if the file was actually downloaded and has content
   if [ ! -s "$output_file" ]; then
-    error "Downloaded file is empty. Please check if the release exists at $url"
+    error "Downloaded file is empty. This could mean:
+  1. The release asset is corrupted
+  2. The download was interrupted
+Please try again or check ${REPO_URL}/releases for issues."
   fi
 }
 
@@ -185,17 +209,39 @@ extract_zip() {
 
   info "Extracting to $extract_dir"
 
+  # First verify the zip file exists and is a valid zip
+  if [ ! -f "$zip_file" ]; then
+    error "Zip file not found at $zip_file"
+  fi
+
+  # Check if it's actually a zip file
+  if ! file "$zip_file" | grep -q "Zip archive data" && ! file "$zip_file" | grep -q "ZIP archive"; then
+    error "Invalid zip file at $zip_file. Downloaded file is not a valid zip archive."
+  fi
+
   if command_exists unzip; then
-    unzip -qo "$zip_file" -d "$extract_dir"
+    if ! unzip -t "$zip_file" > /dev/null 2>&1; then
+      error "Zip file is corrupted or invalid: $zip_file"
+    fi
+    unzip -qo "$zip_file" -d "$extract_dir" || error "Failed to extract zip file: $zip_file"
   else
     # Try with Python if available
     if command_exists python3; then
-      python3 -m zipfile -e "$zip_file" "$extract_dir"
+      python3 -m zipfile -e "$zip_file" "$extract_dir" || error "Failed to extract zip file using Python: $zip_file"
     elif command_exists python; then
-      python -m zipfile -e "$zip_file" "$extract_dir"
+      python -m zipfile -e "$zip_file" "$extract_dir" || error "Failed to extract zip file using Python: $zip_file"
     else
-      error "No method available to extract zip files"
+      error "No method available to extract zip files. Please install unzip or Python and try again."
     fi
+  fi
+
+  # Verify the executable was extracted
+  if [ ! -f "$extract_dir/$executable" ]; then
+    error "Expected executable '$executable' not found in extracted files.
+This could mean:
+  1. The release asset is corrupted
+  2. The release asset structure has changed
+Please report this issue at ${REPO_URL}/issues"
   fi
 }
 
@@ -258,22 +304,22 @@ download_and_run() {
     if [ ! -f "$local_zip" ]; then
       error "Local zip file does not exist: $local_zip"
     fi
-    cp "$local_zip" "$zip_path"
+    cp "$local_zip" "$zip_path" || error "Failed to copy local zip file to temp directory"
   else
     # Determine the zip file name based on platform
     local zip_file_name
     case "$platform" in
       linux)
-        zip_file_name="gv-linux.zip"
+        zip_file_name="gv-x86_64-unknown-linux-gnu.zip"
         ;;
       macos)
-        zip_file_name="gv-macos.zip"
+        zip_file_name="gv-x86_64-apple-darwin.zip"
         ;;
       macos-arm)
-        zip_file_name="gv-macos-arm.zip"
+        zip_file_name="gv-aarch64-apple-darwin.zip"
         ;;
       windows)
-        zip_file_name="gv-windows.zip"
+        zip_file_name="gv-x86_64-pc-windows-msvc.exe.zip"
         ;;
       *)
         error "Unsupported platform: $platform"
@@ -286,11 +332,17 @@ download_and_run() {
     local release_url="${REPO_API_URL}/releases/tags/${version}"
     if command_exists curl; then
       if ! curl -sSL -f "$release_url" > /dev/null 2>&1; then
-        error "Release ${version} not found. Please check available releases at ${REPO_URL}/releases"
+        error "Release ${version} not found at ${REPO_URL}/releases
+This could mean:
+  1. The release is still being created
+  2. The release was deleted
+  3. The release tag is incorrect
+Please check ${REPO_URL}/releases for available versions."
       fi
     elif command_exists wget; then
       if ! wget -q --spider "$release_url" 2>/dev/null; then
-        error "Release ${version} not found. Please check available releases at ${REPO_URL}/releases"
+        error "Release ${version} not found at ${REPO_URL}/releases
+Please check ${REPO_URL}/releases for available versions."
       fi
     fi
 
@@ -299,26 +351,40 @@ download_and_run() {
     download_file "$download_url" "$zip_path"
   fi
 
+  # Find the executable name before extracting
+  local executable
+  case "$platform" in
+    linux)
+      executable="gv-x86_64-unknown-linux-gnu"
+      ;;
+    macos)
+      executable="gv-x86_64-apple-darwin"
+      ;;
+    macos-arm)
+      executable="gv-aarch64-apple-darwin"
+      ;;
+    windows)
+      executable="gv-x86_64-pc-windows-msvc.exe"
+      ;;
+    *)
+      error "Unsupported platform: $platform"
+      ;;
+  esac
+
   # Extract the zip file
   extract_zip "$zip_path" "$TEMP_DIR"
 
-  # Find the executable
-  local executable
-  if [ "$platform" = "windows" ]; then
-    executable="gv.exe"
-  else
-    executable="gv"
-  fi
-
   # Make the executable executable
-  chmod +x "$TEMP_DIR/$executable"
+  chmod +x "$TEMP_DIR/$executable" || error "Failed to make $executable executable"
 
   # Run the installation
   info "Running git-vault installer..."
 
   # Just run the installer and pass the current directory to it
   # The installer will interactively handle global vs. local installation
-  "$TEMP_DIR/$executable" install "$(pwd)" $extra_args
+  if ! "$TEMP_DIR/$executable" install "$(pwd)" $extra_args; then
+    error "Installation failed. Please check the error messages above."
+  fi
 }
 
 # Uninstall git-vault
