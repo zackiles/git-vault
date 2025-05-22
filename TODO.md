@@ -57,6 +57,23 @@ During install, check if user has a project config file with tasks in it at the 
 
 Sorted by **observed popularity in GitHub OSS projects**, focused on repositories with developer-invoked task configs.
 
+### 7 ) CI/CD Workflow Integration
+
+- **Objective**: Provide automated CI/CD workflow templates for unsealing vaulted items in GitHub Actions.
+- Create workflow templates that users can install to automatically unseal vaulted items in CI
+- Support two authentication methods:
+  - File-based password/key stored as GitHub Secret
+  - 1Password integration using `1password/load-secrets-action@v2` for seamless secret management
+- Workflow should:
+  - Install `gv` in the runner
+  - Configure authentication (file-based or 1Password)
+  - Unseal specified vaulted items
+  - Clean up secrets after use
+- Provide clear documentation and examples for both authentication methods
+- Include security best practices and warnings about secret management
+- Add tests that verify the workflow templates work in CI environment
+- Consider adding a command like `gv workflow install` that helps users set up the CI integration
+
 ## Completed TODOs
 
 Once TODOs are fully implemented, tested, and documented, move them here for future reference. TODOs in this section no longer need to be implemented and are kept for historical reasons.

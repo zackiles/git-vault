@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/zackiles/git-vault/main/install.sh 
 **Homebrew (macOS/Linux):**
 
 ```bash
-brew tap zackiles/git-vault
+brew tap zackiles/homebrew-git-vault
 brew install gv
 ```
 
@@ -63,21 +63,31 @@ The process creates `.vault/` for configuration/storage, an empty `.vault/config
 > [!NOTE]
 > GPG must be installed; this is verified during initialization.
 
-## Usage
+## Uninstallation
 
-**First secret? Initialize your vault:**
+Assuming you no longer have repositories that gv manages secrets for and you'd like to remove it globally from your system can do so by running:
 
 ```bash
-gv init
+gv uninstall
 ```
 
-**Now add a file or folder to the vault:**
+This will determine how it was installed and use the appropriate uninstaller if you used a package manager like Brew or Chocolatey (or it falls back to manually removing itself).
+
+> [!NOTE]
+> To remove git-vault from a specific project without uninstalling the CLI:
+>
+> - Run `gv remove-all`
+> - Remove gv-related entries from `.gitignore`
+
+## Usage
+
+**Add a file or folder to the vault:**
 
 ```bash
 gv <path/to/your/secret>
 ```
 
-Encrypts, stores it in `.vault/storage/`, updates `.gitignore`, manages password (local file or 1Password). Easy peasy
+The command encrypts and stores your file in `.vault/storage/`, updates `.gitignore`, and manages the password (local file or 1Password). Easy peasy!
 
 **Remove from vault:**
 
@@ -95,11 +105,8 @@ gv list
 
 Displays managed files/directories, status, and archive sizes.
 
-> [!TIP]
-> You can also use `git-vault` as an alias for `gv` for backward compatibility.
-
 > [!IMPORTANT]
-> Your .gitignore will be automatically updated and you're safe to commit everything including `.vault/storage/` and `.vault/config.json`)
+> Your .gitignore will be automatically updated to ignore the password files and you're safe to commit everything else including `.vault/storage/` and `.vault/config.json`)
 
 ## Git LFS Integration
 

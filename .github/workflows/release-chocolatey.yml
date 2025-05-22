@@ -1,8 +1,8 @@
-name: Update Chocolatey Package
+name: Chocolatey Release
 
 on:
   workflow_run:
-    workflows: ["Release"]
+    workflows: ["Github Release"]
     types:
       - completed
 
@@ -35,6 +35,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Git LFS
+        shell: bash
+        run: |
+          # Install Git LFS on Windows
+          git lfs install
+
       - name: Get release details
         id: release
         shell: bash
@@ -62,6 +68,11 @@ jobs:
           VERSION="${TAG#v}"
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
+          # Download release notes
+          echo "Downloading release notes..."
+          gh release view $TAG --json body -q '.body' > RELEASE_NOTES.txt
+          echo "Release notes downloaded successfully."
+
       - name: Download release artifacts
         shell: powershell
         env:
@@ -85,12 +96,19 @@ jobs:
             exit 1
           }
 
+          # Download the release notes file
+          Write-Host "Copying release notes to package..."
+          Copy-Item -Path "${{ github.workspace }}/RELEASE_NOTES.txt" -Destination "choco-pkg/tools/RELEASE_NOTES.txt"
+
           Write-Host "Release artifacts downloaded successfully."
 
       - name: Generate Chocolatey package files
         shell: powershell
         run: |
           $version = "${{ steps.release.outputs.VERSION }}"
+
+          # Copy LICENSE to the tools directory
+          Copy-Item -Path "${{ github.workspace }}/LICENSE" -Destination "choco-pkg/tools/LICENSE"
 
           # Create nuspec file
           @"
@@ -102,10 +120,16 @@ jobs:
               <title>Git Vault (gv)</title>
               <authors>zackiles</authors>
               <projectUrl>https://github.com/zackiles/git-vault</projectUrl>
+              <projectSourceUrl>https://github.com/zackiles/git-vault</projectSourceUrl>
+              <docsUrl>https://github.com/zackiles/git-vault/blob/main/README.md</docsUrl>
+              <iconUrl>https://github.com/zackiles/git-vault/blob/main/logo.ico</iconUrl>
+              <bugTrackerUrl>https://github.com/zackiles/git-vault/issues</bugTrackerUrl>
               <licenseUrl>https://github.com/zackiles/git-vault/blob/main/LICENSE</licenseUrl>
-              <requireLicenseAcceptance>false</requireLicenseAcceptance>
-              <description>Drop-dead simple solution for sharing sensitive things in git repositories</description>
-              <tags>git security secrets vault encryption</tags>
+              <licenseFile>tools/LICENSE</licenseFile>
+              <releaseNotes>tools/RELEASE_NOTES.txt</releaseNotes>
+              <requireLicenseAcceptance>true</requireLicenseAcceptance>
+              <description>Commit your secrets safely and effortlessly with Git using GPG. 1Password supported. Transparently encrypts files or folder on commit, decrypts on checkout. Handles Git LFS automatically for large files.</description>
+              <summary>Easiest way to encrypt/decrypt files or folders in your git repository.</summary>
             </metadata>
             <files>
               <file src="tools\**" target="tools" />
@@ -136,9 +160,6 @@ jobs:
 
           # Create primary command as gv.exe
           Copy-Item -Path `$exeFile -Destination (Join-Path `$toolsDir "gv.exe") -Force
-
-          # Also create git-vault.exe as an alias
-          Copy-Item -Path `$exeFile -Destination (Join-Path `$toolsDir "git-vault.exe") -Force
           "@ | Out-File -Encoding utf8 -FilePath .\choco-pkg\tools\chocolateyInstall.ps1
 
           # Create verification file
@@ -150,8 +171,23 @@ jobs:
           This package is published by the git-vault project itself. The binaries are
           identical to those in the released zip files from the official GitHub releases.
 
-          URL: https://github.com/zackiles/git-vault/releases/tag/v$version
+          Package Source: https://github.com/zackiles/git-vault
+          Release URL: https://github.com/zackiles/git-vault/releases/tag/v$version
+
+          To verify the binary:
+
+          1. Download the official release from the URL above
+          2. Generate a checksum using:
+             - PowerShell: Get-FileHash -Algorithm SHA256 gv.exe
+             - Command Prompt: certutil -hashfile gv.exe SHA256
+
+          3. Compare the checksum with:
           "@ | Out-File -Encoding utf8 -FilePath .\choco-pkg\tools\VERIFICATION.txt
+
+          # Calculate and append checksum
+          $exePath = Get-ChildItem -Path ".\choco-pkg\tools" -Filter "*.exe" | Select-Object -First 1 -ExpandProperty FullName
+          $hash = Get-FileHash -Path $exePath -Algorithm SHA256
+          Add-Content -Path .\choco-pkg\tools\VERIFICATION.txt -Value "SHA256: $($hash.Hash)"
 
       - name: Install Chocolatey
         shell: powershell

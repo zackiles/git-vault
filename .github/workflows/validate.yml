@@ -1,4 +1,4 @@
-name: PR Validation
+name: Validate Pull Request
 
 on:
   pull_request:
@@ -63,24 +63,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gnupg zip unzip
 
+      - name: Install Git LFS
+        run: |
+          sudo apt-get install -y git-lfs
+          git lfs install
+
       - name: Lint and type check
         run: deno task check
 
-      - name: Run unit tests
-        env:
-          NON_INTERACTIVE: true
-        run: |
-          # Use direct test command to avoid interactive prompts
-          # For better test coverage without interactive prompts
-          DENO_ENV=test deno test -A --reporter=dot test/**/*.test.ts
-
-      - name: Run select integration tests
-        env:
-          NON_INTERACTIVE: true
-          RUN_INTEGRATION_TESTS: true
-        run: |
-          # Run non-interactive integration tests that don't require 1Password
-          DENO_ENV=test deno test -A --reporter=dot --filter "installation" test/install-local.test.ts
+      - name: Run tests
+        run: deno task test
 
       - name: Build dry run
         run: deno task build --bin-path=./bin-test

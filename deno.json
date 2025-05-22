@@ -1,11 +1,10 @@
 {
   "name": "@zackiles/git-vault",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Drop-dead simple solution for sharing sensitive things in git repositories.",
   "tasks": {
     "dev": "DENO_ENV=development deno run -A src/cli.ts",
-    "test": "DENO_ENV=test deno run -A scripts/test.ts",
-    "test:integration": "DENO_ENV=test RUN_INTEGRATION_TESTS=true deno run -A scripts/test.ts",
+    "test": "deno run -A scripts/test.ts",
     "check": "deno lint && deno check src/cli.ts",
     "tag": "deno run -A scripts/tag.ts",
     "pre-publish": "deno run -A scripts/pre-publish.ts",
@@ -16,9 +15,7 @@
   "unstable": [
     "net",
     "http",
-    "fs",
-    "ffi",
-    "temporal"
+    "fs"
   ],
   "imports": {
     "@std/async": "jsr:@std/async@1",

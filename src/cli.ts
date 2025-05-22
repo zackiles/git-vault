@@ -6,12 +6,14 @@ import { exists } from '@std/fs'
 import add from './commands/add.ts'
 import remove from './commands/remove.ts'
 import list from './commands/list.ts'
-import init from './commands/init.ts'
 import version from './commands/version.ts'
+import uninstall from './commands/uninstall.ts'
 import gracefulShutdown from './utils/graceful-shutdown.ts'
 import terminal from './utils/terminal.ts'
 import { COMMAND_DESCRIPTIONS } from './constants.ts'
 import type { BaseCommandArgs, CLIOptions, CommandName, CommandRegistry } from './types.ts'
+
+Deno.env.set('GV_VERSION', '0.0.5')
 
 // IMPORTANT: Production is the default, must be overridden in tests/development/integration tests
 if (!Deno.env.get('DENO_ENV')) {
@@ -25,27 +27,25 @@ const options: CLIOptions = {
     rm: 'remove',
     l: 'list',
     ls: 'list',
-    i: 'init',
-    install: 'init',
     v: 'version',
     h: 'help',
     w: 'workspace',
+    u: 'uninstall',
   },
   string: ['workspace'],
-  boolean: ['help', 'version', 'continueInstall'], // NOTE: continueInstall is used for self-replication during initial install
+  boolean: ['help', 'version'],
   default: {
     workspace: '.',
   },
   stopEarly: false,
 }
 
-// Map command names to handlers
 const handlers: CommandRegistry = {
   add,
   remove,
   list,
-  init,
   version,
+  uninstall,
 }
 
 function printHelp() {
@@ -55,11 +55,11 @@ function printHelp() {
     ${bold('Usage:')} gv ${cyan('<command>')} ${yellow('[options]')}
 
     ${bold('Commands:')}
-      add      ${COMMAND_DESCRIPTIONS.add}
-      remove   ${COMMAND_DESCRIPTIONS.remove}
-      list     ${COMMAND_DESCRIPTIONS.list}
-      init     ${COMMAND_DESCRIPTIONS.init}
-      version  ${COMMAND_DESCRIPTIONS.version}
+      add       ${COMMAND_DESCRIPTIONS.add}
+      remove    ${COMMAND_DESCRIPTIONS.remove}
+      list      ${COMMAND_DESCRIPTIONS.list}
+      version   ${COMMAND_DESCRIPTIONS.version}
+      uninstall ${COMMAND_DESCRIPTIONS.uninstall}
 
     ${bold('Global Options:')}
       --workspace, -w  Path to the Git repository (default: current directory)
@@ -71,11 +71,8 @@ function printHelp() {
       gv add config                      # Add a directory named config
       gv remove secrets.txt              # Remove a file
       gv list                            # List all vault files in specific workspace
-      gv init                            # Initialize git-vault hooks
 
-    Run "gv ${cyan('<command>')} ${yellow('--help')}" or "git-vault ${cyan('<command>')} ${
-    yellow('--help')
-  }" for more information on a specific command.
+    Run "gv ${cyan('<command>')} ${yellow('--help')}" for more information on a specific command.
   `)
 }
 
@@ -98,7 +95,7 @@ async function main(args: string[] = Deno.args): Promise<void> {
   // Development mode setup
   if (Deno.env.get('DENO_ENV') === 'development') {
     // Create a temporary directory
-    tempDir = await Deno.makeTempDir({ prefix: 'git-vault-dev-' })
+    tempDir = await Deno.makeTempDir({ prefix: 'gv-dev-' })
     console.log(green(`Development Mode. Temporary workspace directory: ${tempDir}`))
 
     // Change to the temporary directory
@@ -113,11 +110,7 @@ async function main(args: string[] = Deno.args): Promise<void> {
           if (originalCwd) Deno.chdir(originalCwd)
           Deno.removeSync(tempDir, { recursive: true })
         } catch (error) {
-          console.error(
-            `Failed to clean up temporary directory: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          )
+          terminal.error('Failed to clean up temporary directory:', error)
         }
       }
     })
@@ -149,7 +142,7 @@ async function runCommand(args: string[]) {
     return
   }
   if (parsed.version) {
-    await handlers.version.run({ _: [] })
+    await handlers.version({ _: [] })
     return
   }
 
@@ -170,7 +163,7 @@ async function runCommand(args: string[]) {
 
       const displayOptions = [
         `Run the '${cyan(command)}' command`,
-        `Add '${cyan(command)}' to git-vault`,
+        `Add '${cyan(command)}' to gv`,
       ]
 
       const choice = terminal.promptSelect(
@@ -178,10 +171,10 @@ async function runCommand(args: string[]) {
         displayOptions,
       )
 
-      if (choice.includes(`Add '${command}' to git-vault`)) {
+      if (choice.includes(`Add '${command}' to gv`)) {
         // Treat as a path instead of a command
         rest.unshift(command)
-        await handlers.add.run({ ...parsed, _: rest })
+        await handlers.add({ ...parsed, _: rest })
         return
       }
       // Otherwise continue with command execution
@@ -204,11 +197,11 @@ async function runCommand(args: string[]) {
 
   // Prepare arguments for the handler
   const handlerArgs: BaseCommandArgs = { ...parsed, _: rest }
-  await handlers[cmd].run(handlerArgs)
+  await handlers[cmd](handlerArgs)
 }
 
 if (import.meta.main) {
-  gracefulShutdown.startAndWrap(() => main())
+  gracefulShutdown.startAndWrap(main)
 }
 
 export default main

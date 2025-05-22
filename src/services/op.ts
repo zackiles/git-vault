@@ -4,12 +4,14 @@
  * This file provides functions for interacting with the 1Password CLI
  */
 
+import terminal from '../utils/terminal.ts'
+
 /**
  * Checks if 1Password CLI is installed and available
  *
  * @returns Promise that resolves to true if 1Password CLI is available
  */
-export async function isOpAvailable(): Promise<boolean> {
+async function isOpAvailable(): Promise<boolean> {
   try {
     const command = new Deno.Command('op', {
       args: ['--version'],
@@ -29,7 +31,7 @@ export async function isOpAvailable(): Promise<boolean> {
  *
  * @returns Promise that resolves to true if the user is signed in
  */
-export async function isSignedIn(): Promise<boolean> {
+async function isSignedIn(): Promise<boolean> {
   try {
     const command = new Deno.Command('op', {
       args: ['whoami'],
@@ -49,7 +51,7 @@ export async function isSignedIn(): Promise<boolean> {
  *
  * @returns Promise that resolves to an array of vault names
  */
-export async function getVaults(): Promise<string[]> {
+async function getVaults(): Promise<string[]> {
   try {
     if (!await isSignedIn()) {
       return []
@@ -85,7 +87,7 @@ export async function getVaults(): Promise<string[]> {
  * @param fields Additional fields to store
  * @returns Promise that resolves to true if successful
  */
-export async function createPasswordItem(
+async function createPasswordItem(
   itemName: string,
   vaultName: string,
   password: string,
@@ -93,7 +95,7 @@ export async function createPasswordItem(
 ): Promise<boolean> {
   try {
     if (!await isSignedIn()) {
-      console.error('Not signed in to 1Password')
+      terminal.error('Not signed in to 1Password')
       return false
     }
 
@@ -132,10 +134,7 @@ export async function createPasswordItem(
 
     return true
   } catch (error) {
-    console.error(
-      'Error creating 1Password item:',
-      error instanceof Error ? error.message : String(error),
-    )
+    terminal.error('Error creating 1Password item:', error)
     return false
   }
 }
@@ -147,10 +146,10 @@ export async function createPasswordItem(
  * @param vaultName Name of the vault where the item is stored
  * @returns Promise that resolves to the password if successful, or null if not
  */
-export async function getPassword(itemName: string, vaultName: string): Promise<string | null> {
+async function getPassword(itemName: string, vaultName: string): Promise<string | null> {
   try {
     if (!await isSignedIn()) {
-      console.error('Not signed in to 1Password')
+      terminal.error('Not signed in to 1Password')
       return null
     }
 
@@ -163,17 +162,14 @@ export async function getPassword(itemName: string, vaultName: string): Promise<
     const { success, stdout, stderr } = await command.output()
 
     if (!success) {
-      console.error('Failed to get 1Password item:', new TextDecoder().decode(stderr))
+      terminal.error('Failed to get 1Password item:', new TextDecoder().decode(stderr))
       return null
     }
 
     const password = new TextDecoder().decode(stdout).trim()
     return password || null
   } catch (error) {
-    console.error(
-      'Error getting 1Password item:',
-      error instanceof Error ? error.message : String(error),
-    )
+    terminal.error('Error getting 1Password item:', error)
     return null
   }
 }
@@ -186,14 +182,14 @@ export async function getPassword(itemName: string, vaultName: string): Promise<
  * @param fields Fields to update
  * @returns Promise that resolves to true if successful
  */
-export async function updateItem(
+async function updateItem(
   itemName: string,
   vaultName: string,
   fields: Record<string, string>,
 ): Promise<boolean> {
   try {
     if (!await isSignedIn()) {
-      console.error('Not signed in to 1Password')
+      terminal.error('Not signed in to 1Password')
       return false
     }
 
@@ -214,16 +210,13 @@ export async function updateItem(
     const { success, stderr } = await command.output()
 
     if (!success) {
-      console.error('Failed to update 1Password item:', new TextDecoder().decode(stderr))
+      terminal.error('Failed to update 1Password item:', new TextDecoder().decode(stderr))
       return false
     }
 
     return true
   } catch (error) {
-    console.error(
-      'Error updating 1Password item:',
-      error instanceof Error ? error.message : String(error),
-    )
+    terminal.error('Error updating 1Password item:', error)
     return false
   }
 }
@@ -235,6 +228,16 @@ export async function updateItem(
  * @param vaultName Name of the vault where the item is stored
  * @returns Promise that resolves to true if successful
  */
-export async function markItemRemoved(itemName: string, vaultName: string): Promise<boolean> {
+async function markItemRemoved(itemName: string, vaultName: string): Promise<boolean> {
   return await updateItem(itemName, vaultName, { status: 'removed' })
+}
+
+export {
+  createPasswordItem,
+  getPassword,
+  getVaults,
+  isOpAvailable,
+  isSignedIn,
+  markItemRemoved,
+  updateItem,
 }

@@ -1,0 +1,22 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# Rules for This Project
+
+- This is a Deno 2 project
+- Source files in `src/` and tests in `test/`
+- Running development, Testing, Linting, Type-checking and other tasks are provided in Deno tasks in the file `deno.json`. Always use them instead of direct calls to the Deno CLI such as `deno test -A ...`
+- Git commit messages are semantic commit
+- Github actions automate building, testing, and releasing for: Github Release, Chocolatey, and Homebrew tap. Their Github Workflows are in `.github`
+- Avoid repetitve code, refactor to hoist and share functions and variables that are used in multiple places
+- User facing errors for code in `src/` MUST use the terminal.error message in the file `src/utils/terminal.ts`
+- Prompts, spinners, and other interactive CLI elements MUST be provided by the file `src/utils/terminal.ts`
+- Avoid hardcoding values such as paths in multiple places, instead use the file [constants.ts](mdc:src/constants.ts)
+- Follow the Javascript style guide and standards in `.cursor/rules/with-javascript.mdc`
+- Never leave obvious or redudant inline code comments
+- Rarely use inline code comments
+- Always use `deno task test` to run tests
+- Always run tests after a large change to code files in  `src/` or `test/`
+- This project can be tests and run on ALL platforms so you MUST ensure all code, such as paths, work on Windows Linux and MacOS

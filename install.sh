@@ -1,105 +1,107 @@
 #!/usr/bin/env bash
 # Git-Vault Installer
-# -------------------
-# This script downloads and installs git-vault, a tool for securely
-# storing sensitive files in Git repositories using GPG encryption.
+# One-line installation:
+#   curl -fsSL ${RAW_CONTENT_URL}/install.sh | bash
+#
+# Install specific version:
+#   curl -fsSL ${RAW_CONTENT_URL}/install.sh | bash -s -- --version v0.1.0
+#
+print_help() {
+  echo "Git Vault - Installer"
+  echo ""
+  echo "Usage: ./install.sh [options]"
+  echo ""
+  echo "Options:"
+  echo "  --version, -V VERSION  Install specific version (e.g., v0.1.0)"
+  echo "  --uninstall, -u        Uninstall gv using the 'gv uninstall' command"
+  echo "  --local-zip PATH       Use local zip file (for testing)"
+  echo "  --help, -h             Show this help message"
+  echo "  --verbose, -v          Enable verbose debugging output"
+  echo ""
+  echo "Description:"
+  echo "  This script downloads and installs gv, a tool for securely"
+  echo "  storing sensitive files in Git repositories using GPG encryption."
+  echo ""
+  echo "Examples:"
+  echo "  ./install.sh                         # Install gv"
+  echo "  ./install.sh --version v0.1.0        # Install specific version"
+  echo "  ./install.sh --uninstall             # Uninstall gv using built-in command"
+  echo "  ./install.sh --local-zip ./path.zip  # Use local zip file"
+  echo "  ./install.sh --verbose               # Install with verbose output"
+}
 
-# Enable debugging - uncomment to see detailed execution
-# set -x
-
-# Exit on error
 set -e
 
-# Trap errors to ensure we show useful information
 trap 'last_command=$current_command; current_command=$BASH_COMMAND' DEBUG
 trap 'echo "ERROR: Command \"${last_command}\" failed with exit code $? at line ${LINENO}"' ERR
 
-# GitHub repository configuration
 REPO_OWNER="zackiles"
 REPO_NAME="git-vault"
 REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}"
 REPO_API_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}"
 RAW_CONTENT_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main"
 
-# Detect if we're being piped through curl
+# Detect if we're being piped through curl and redirect errors to stdout if so
 if [ -t 1 ]; then
-  # Terminal is interactive
   INTERACTIVE=true
 else
-  # We're being piped (e.g., through curl)
   INTERACTIVE=false
-  # Ensure stderr is redirected to stdout so errors appear
   exec 2>&1
 fi
 
-# Usage:
-#   ./install.sh                   # Download and run the installer
-#   ./install.sh --version v0.1.0  # Install specific version
-#   ./install.sh --uninstall       # Remove git-vault
-#   ./install.sh --local-zip PATH  # Use a local zip file (for testing)
-#
-# One-line installation:
-#   curl -fsSL ${RAW_CONTENT_URL}/install.sh | bash
-#
-# Install specific version:
-#   curl -fsSL ${RAW_CONTENT_URL}/install.sh | bash -s -- --version v0.1.0
-
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Print colored message
 print_message() {
   local color="$1"
   local message="$2"
   echo -e "${color}${message}${NC}"
 }
 
-# Print error message and exit
 error() {
   print_message "${RED}" "ERROR: $1"
   exit 1
 }
 
-# Print info message
 info() {
   print_message "${BLUE}" "INFO: $1"
 }
 
-# Print success message
 success() {
   print_message "${GREEN}" "SUCCESS: $1"
 }
 
-# Print warning message
 warning() {
   print_message "${YELLOW}" "WARNING: $1"
 }
 
-# Compare version strings
-# Returns 0 if v1 > v2, 1 if v1 < v2, 2 if equal
 compare_versions() {
-  local v1="$1"
-  local v2="$2"
+  local v1="${1#v}"
+  local v2="${2#v}"
 
-  # Remove 'v' prefix if present
-  v1="${v1#v}"
-  v2="${v2#v}"
+  local IFS='.'
+  local i v1_parts=($v1) v2_parts=($v2)
 
-  # Use sort to compare the versions
-  if [ "$v1" = "$v2" ]; then
-    return 2
-  elif [ "$(printf '%s\n' "$v1" "$v2" | sort -V | head -n1)" = "$v1" ]; then
-    return 1
-  else
+  for ((i=0; i<${#v1_parts[@]} && i<${#v2_parts[@]}; i++)); do
+    if [[ ${v1_parts[i]} -gt ${v2_parts[i]} ]]; then
+      return 0
+    elif [[ ${v1_parts[i]} -lt ${v2_parts[i]} ]]; then
+      return 1
+    fi
+  done
+
+  if [[ ${#v1_parts[@]} -gt ${#v2_parts[@]} ]]; then
     return 0
+  elif [[ ${#v1_parts[@]} -lt ${#v2_parts[@]} ]]; then
+    return 1
   fi
+
+  return 2
 }
 
-# Determine OS and architecture
 detect_platform() {
   local os
   local arch
@@ -111,12 +113,14 @@ detect_platform() {
     *)       error "Unsupported operating system: $(uname -s)";;
   esac
 
-  # Detect architecture
   case "$(uname -m)" in
     x86_64|amd64) arch="x64";;
     arm64|aarch64)
       if [ "$os" = "macos" ]; then
         os="macos-arm"
+        arch="arm64"
+      elif [ "$os" = "linux" ]; then
+        os="linux-arm"
         arch="arm64"
       else
         arch="arm64"
@@ -128,90 +132,63 @@ detect_platform() {
   echo "$os"
 }
 
-# Check if a command exists
 command_exists() {
   command -v "$1" &> /dev/null
 }
 
-# Check required dependencies
 check_dependencies() {
-  # Check for unzip or similar tools
   if ! command_exists unzip; then
     warning "unzip not found, will try to use alternative methods for extraction"
   fi
 
-  # Check for git
   if ! command_exists git; then
     error "git is required for git-vault to function"
   fi
 
-  # Check for gpg
   if ! command_exists gpg; then
     warning "gpg not found, will be required for git-vault to function properly"
   fi
 }
 
-# Download a file
 download_file() {
   local url="$1"
   local output_file="$2"
+  local expected_checksum="${3:-}"
 
   info "Downloading from $url"
-  echo "DEBUG: Starting download from $url to $output_file"
 
-  local http_code
   if command_exists curl; then
-    # Use curl with -w to get the HTTP status code and -f to fail on HTTP errors
-    echo "DEBUG: Using curl to download"
-    # Make curl less silent so we can see what's happening
-    http_code=$(curl -v -w '%{http_code}' -fL "$url" -o "$output_file" 2>&1 || echo "000")
-    echo "DEBUG: Curl download completed with status: $http_code"
-    case "$http_code" in
-      200)
-        echo "DEBUG: Download successful"
-        ;;
-      404)
-        error "Release asset not found at $url (HTTP 404). This could mean:
-  1. The release assets are still being uploaded
-  2. The release was not created properly
-  3. The asset name has changed
-Please check ${REPO_URL}/releases for available assets."
-        ;;
-      403)
-        error "Access denied when downloading from $url (HTTP 403).
-Please try again in a few minutes or check ${REPO_URL}/releases"
-        ;;
-      000)
-        error "Network error while downloading from $url.
-Please check your internet connection and try again."
-        ;;
-      *)
-        error "Failed to download file (HTTP $http_code).
-Please check ${REPO_URL}/releases or try again later."
-        ;;
-    esac
+    if ! curl -L -o "$output_file" --progress-bar "$url"; then
+      error "Failed to download file from $url"
+    fi
   elif command_exists wget; then
-    echo "DEBUG: Using wget to download"
-    if ! wget -q --server-response "$url" -O "$output_file" 2>&1 | grep -q '200 OK'; then
-      error "Failed to download file from $url.
-Please check ${REPO_URL}/releases for available assets."
+    if ! wget -O "$output_file" "$url"; then
+      error "Failed to download file from $url"
     fi
   else
-    error "Neither curl nor wget found. Please install either curl or wget and try again."
+    error "Neither curl nor wget found for downloading"
   fi
 
-  # Check if the file was actually downloaded and has content
-  if [ ! -s "$output_file" ]; then
-    error "Downloaded file is empty. This could mean:
-  1. The release asset is corrupted
-  2. The download was interrupted
-Please try again or check ${REPO_URL}/releases for issues."
-  fi
+  if [ -n "$expected_checksum" ]; then
+    local actual_checksum=""
 
-  echo "DEBUG: Download file check passed: $(ls -la "$output_file")"
+    if command_exists sha256sum; then
+      actual_checksum=$(sha256sum "$output_file" | cut -d' ' -f1)
+    elif command_exists shasum; then
+      actual_checksum=$(shasum -a 256 "$output_file" | cut -d' ' -f1)
+    elif command_exists certutil; then
+      actual_checksum=$(certutil -hashfile "$output_file" SHA256 | grep -v "^SHA256" | grep -v "^CertUtil" | tr -d " \t\r\n")
+    else
+      warning "Checksum verification not available on this system"
+      return 0
+    fi
+
+    if [ -n "$actual_checksum" ] && [ "$actual_checksum" != "$expected_checksum" ]; then
+      error "Checksum verification failed for downloaded file"
+    fi
+  fi
 }
 
-# Get the latest release version
 get_latest_version() {
   local api_url="${REPO_API_URL}/releases/latest"
   local version
@@ -229,19 +206,16 @@ get_latest_version() {
   echo "$version"
 }
 
-# Extract zip file
 extract_zip() {
   local zip_file="$1"
   local extract_dir="$2"
 
   info "Extracting to $extract_dir"
 
-  # First verify the zip file exists and is a valid zip
   if [ ! -f "$zip_file" ]; then
     error "Zip file not found at $zip_file"
   fi
 
-  # Check if it's actually a zip file
   if ! file "$zip_file" | grep -q "Zip archive data" && ! file "$zip_file" | grep -q "ZIP archive"; then
     error "Invalid zip file at $zip_file. Downloaded file is not a valid zip archive."
   fi
@@ -252,7 +226,6 @@ extract_zip() {
     fi
     unzip -qo "$zip_file" -d "$extract_dir" || error "Failed to extract zip file: $zip_file"
   else
-    # Try with Python if available
     if command_exists python3; then
       python3 -m zipfile -e "$zip_file" "$extract_dir" || error "Failed to extract zip file using Python: $zip_file"
     elif command_exists python; then
@@ -261,29 +234,40 @@ extract_zip() {
       error "No method available to extract zip files. Please install unzip or Python and try again."
     fi
   fi
-
-  # Verify the executable was extracted
-  if [ ! -f "$extract_dir/$executable" ]; then
-    error "Expected executable '$executable' not found in extracted files.
-This could mean:
-  1. The release asset is corrupted
-  2. The release asset structure has changed
-Please report this issue at ${REPO_URL}/issues"
-  fi
 }
 
-# Create temp directory
 create_temp_dir() {
   if command_exists mktemp; then
     mktemp -d -t git-vault-XXXXXXXXXX
   else
-    local temp_dir="/tmp/git-vault-$(date +%s)"
+    local temp_base=""
+
+    case "$(uname -s)" in
+      MINGW*|MSYS*|CYGWIN*)
+        if [ -n "$TEMP" ]; then
+          temp_base="$TEMP"
+        elif [ -n "$TMP" ]; then
+          temp_base="$TMP"
+        else
+          temp_base="$HOME/AppData/Local/Temp"
+        fi
+        ;;
+      *)
+        if [ -d "/tmp" ]; then
+          temp_base="/tmp"
+        else
+          temp_base="$HOME/.temp"
+          mkdir -p "$temp_base"
+        fi
+        ;;
+    esac
+
+    local temp_dir="${temp_base}/git-vault-$(date +%s)"
     mkdir -p "$temp_dir"
     echo "$temp_dir"
   fi
 }
 
-# Clean up temporary files
 cleanup() {
   if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
     info "Cleaning up temporary files"
@@ -291,18 +275,10 @@ cleanup() {
   fi
 }
 
-# Check if git-vault is installed and get its version
 check_installed_version() {
   if command_exists gv; then
     local current_version
     current_version=$(gv version 2>/dev/null | grep -o 'v[0-9]*\.[0-9]*\.[0-9]*' || echo "unknown")
-    if [ "$current_version" != "unknown" ]; then
-      echo "$current_version"
-      return 0
-    fi
-  elif command_exists git-vault; then
-    local current_version
-    current_version=$(git-vault version 2>/dev/null | grep -o 'v[0-9]*\.[0-9]*\.[0-9]*' || echo "unknown")
     if [ "$current_version" != "unknown" ]; then
       echo "$current_version"
       return 0
@@ -312,37 +288,112 @@ check_installed_version() {
   return 1
 }
 
-# Download and run the git-vault binary
-download_and_run() {
+get_bin_path() {
+  local homeDir="$HOME"
+  if [ -z "$homeDir" ]; then
+    error "Could not determine user home directory"
+  fi
+
+  case "$(uname -s)" in
+    Linux*)
+      echo "$homeDir/.local/bin"
+      ;;
+    Darwin*)
+      if [ -d "$homeDir/bin" ]; then
+        echo "$homeDir/bin"
+      else
+        echo "$homeDir/.local/bin"
+      fi
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      echo "$homeDir/AppData/Local/Microsoft/WindowsApps"
+      ;;
+    *)
+      error "Unsupported operating system: $(uname -s)"
+      ;;
+  esac
+}
+
+install_global_binary() {
+  local src_file="$1"
+  local bin_dir="$2"
+  local binary_name="gv"
+  local is_windows=false
+  local path_sep=":"
+
+  if [[ "$(uname -s)" == MINGW* ]] || [[ "$(uname -s)" == MSYS* ]] || [[ "$(uname -s)" == CYGWIN* ]]; then
+    binary_name="gv.exe"
+    is_windows=true
+    path_sep=";"
+  fi
+
+  mkdir -p "$bin_dir" || error "Failed to create directory: $bin_dir"
+
+  local target_path="$bin_dir/$binary_name"
+
+  cp "$src_file" "$target_path" || error "Failed to copy executable to $target_path"
+
+  if [ "$is_windows" = false ]; then
+    chmod +x "$target_path" || error "Failed to make $target_path executable"
+  fi
+
+  if ! echo "$PATH" | tr "$path_sep" '\n' | grep -q "^$bin_dir$"; then
+    info "Note: $bin_dir is not in your PATH"
+    if [ "$is_windows" = true ]; then
+      info "You may need to add it manually to use gv globally."
+    else
+      local shell_file=""
+      if [ -f "$HOME/.zshrc" ]; then
+        shell_file="$HOME/.zshrc"
+      elif [ -f "$HOME/.bashrc" ]; then
+        shell_file="$HOME/.bashrc"
+      elif [ -f "$HOME/.bash_profile" ]; then
+        shell_file="$HOME/.bash_profile"
+      elif [ -f "$HOME/.profile" ]; then
+        shell_file="$HOME/.profile"
+      fi
+
+      if [ -n "$shell_file" ]; then
+        info "Consider adding the following line to $shell_file:"
+        echo "export PATH=\"\$PATH$path_sep$bin_dir\""
+      else
+        info "Add $bin_dir to your PATH to use gv globally."
+      fi
+    fi
+  fi
+
+  return 0
+}
+
+download_and_install() {
   local platform="$1"
   local version="$2"
-  local extra_args="$3"
-  local local_zip="$4"
+  local local_zip="$3"
+  local path_sep=":"
 
-  # Debug output to see if we get this far
-  echo "DEBUG: Entering download_and_run function"
-  echo "DEBUG: Platform: $platform, Version: $version"
+  if [[ "$(uname -s)" == MINGW* ]] || [[ "$(uname -s)" == MSYS* ]] || [[ "$(uname -s)" == CYGWIN* ]]; then
+    path_sep=";"
+  fi
 
-  # Create temp directory
   TEMP_DIR=$(create_temp_dir)
-  echo "DEBUG: Created temp directory: $TEMP_DIR"
   trap cleanup EXIT
 
   local zip_path="${TEMP_DIR}/gv.zip"
 
   if [ -n "$local_zip" ]; then
-    # Use local zip file
     info "Using local zip file: $local_zip"
     if [ ! -f "$local_zip" ]; then
       error "Local zip file does not exist: $local_zip"
     fi
     cp "$local_zip" "$zip_path" || error "Failed to copy local zip file to temp directory"
   else
-    # Determine the zip file name based on platform
     local zip_file_name
     case "$platform" in
       linux)
         zip_file_name="gv-x86_64-unknown-linux-gnu.zip"
+        ;;
+      linux-arm)
+        zip_file_name="gv-aarch64-unknown-linux-gnu.zip"
         ;;
       macos)
         zip_file_name="gv-x86_64-apple-darwin.zip"
@@ -359,49 +410,28 @@ download_and_run() {
     esac
 
     local download_url="${REPO_URL}/releases/download/${version}/${zip_file_name}"
-    echo "DEBUG: Will attempt to download from: $download_url"
-
-    # Manually check if the release asset exists
-    echo "DEBUG: Checking if release asset exists..."
     local asset_check_url="${download_url}"
     local http_code
 
     if command_exists curl; then
       http_code=$(curl -w '%{http_code}' -Isf "$asset_check_url" -o /dev/null || echo "000")
-      echo "DEBUG: HTTP status code for asset: $http_code"
+
       if [ "$http_code" != "200" ]; then
         error "Release asset not found: $download_url (HTTP $http_code)
 Please check ${REPO_URL}/releases for available assets."
       fi
     fi
 
-    # Check if the release exists before attempting download
-    local release_url="${REPO_API_URL}/releases/tags/${version}"
-    echo "DEBUG: Checking if release exists: $release_url"
-    if command_exists curl; then
-      http_code=$(curl -w '%{http_code}' -Isf "$release_url" -o /dev/null || echo "000")
-      echo "DEBUG: HTTP status code for release: $http_code"
-      if [ "$http_code" != "200" ]; then
-        error "Release ${version} not found (HTTP $http_code).
-Please check ${REPO_URL}/releases for available versions."
-      fi
-    elif command_exists wget; then
-      if ! wget -q --spider "$release_url" 2>/dev/null; then
-        error "Release ${version} not found.
-Please check ${REPO_URL}/releases for available versions."
-      fi
-    fi
-
-    info "Downloading ${zip_file_name} from release ${version}"
-    # Download the zip file
     download_file "$download_url" "$zip_path"
   fi
 
-  # Find the executable name before extracting
   local executable
   case "$platform" in
     linux)
       executable="gv-x86_64-unknown-linux-gnu"
+      ;;
+    linux-arm)
+      executable="gv-aarch64-unknown-linux-gnu"
       ;;
     macos)
       executable="gv-x86_64-apple-darwin"
@@ -417,117 +447,46 @@ Please check ${REPO_URL}/releases for available versions."
       ;;
   esac
 
-  echo "DEBUG: Will look for executable: $executable after extraction"
-
-  # Extract the zip file
   extract_zip "$zip_path" "$TEMP_DIR"
 
-  echo "DEBUG: Extraction completed"
-
-  # Check if the executable actually exists
   if [ ! -f "$TEMP_DIR/$executable" ]; then
-    echo "DEBUG: Listing files in temp dir:"
     ls -la "$TEMP_DIR"
     error "Executable not found after extraction: $executable"
   fi
 
-  # Make the executable executable
-  chmod +x "$TEMP_DIR/$executable" || error "Failed to make $executable executable"
+  local bin_dir=$(get_bin_path)
+  info "Installing gv to $bin_dir..."
 
-  # Run the installation
-  info "Running git-vault installer..."
+  install_global_binary "$TEMP_DIR/$executable" "$bin_dir"
 
-  echo "DEBUG: About to execute: $TEMP_DIR/$executable install $(pwd) $extra_args"
-  # Just run the installer and pass the current directory to it
-  # The installer will interactively handle global vs. local installation
-  if ! "$TEMP_DIR/$executable" install "$(pwd)" $extra_args; then
-    error "Installation failed. Please check the error messages above."
+  success "gv installation completed to $bin_dir!"
+  if ! echo "$PATH" | tr "$path_sep" '\n' | grep -q "^$bin_dir$"; then
+    info "NOTE: You may need to restart your terminal or add $bin_dir to your PATH"
   fi
+  info "Run 'gv init' to initialize git-vault in your Git repositories"
 }
 
-# Uninstall git-vault
 uninstall_git_vault() {
-  local cwd="$(pwd)"
-  info "Uninstalling git-vault..."
+  info "Attempting to uninstall git-vault..."
 
-  # Remove local installation
-  if [ -d "$cwd/.vault" ]; then
-    info "Removing git-vault from current repository"
-
-    # Remove git hooks
-    if [ -d "$cwd/.git/hooks" ]; then
-      for hook in "pre-commit" "post-checkout" "post-merge"; do
-        local hook_path="$cwd/.git/hooks/$hook"
-        if [ -f "$hook_path" ] && grep -q "git-vault" "$hook_path"; then
-          info "Removing git-vault hook: $hook"
-          rm -f "$hook_path"
-        fi
-      done
-    fi
-
-    # Remove .vault directory
-    rm -rf "$cwd/.vault"
-
-    # Remove lines from .gitignore
-    if [ -f "$cwd/.gitignore" ]; then
-      info "Updating .gitignore"
-      sed -i.bak '/^\.vault\//d' "$cwd/.gitignore"
-      sed -i.bak '/git-vault/d' "$cwd/.gitignore"
-      rm -f "$cwd/.gitignore.bak"
-    fi
-
-    # Remove lines from .gitattributes if it exists
-    if [ -f "$cwd/.gitattributes" ]; then
-      info "Updating .gitattributes"
-      sed -i.bak '/# Git-Vault LFS tracking/d' "$cwd/.gitattributes"
-      sed -i.bak '/\.vault\/storage/d' "$cwd/.gitattributes"
-      rm -f "$cwd/.gitattributes.bak"
-    fi
-
-    success "Local git-vault installation removed"
-  else
-    warning "No git-vault installation found in current repository"
-  fi
-
-  # Check for global installation
-  local global_gv=""
   if command_exists gv; then
-    global_gv=$(which gv)
-  fi
-
-  if [ -n "$global_gv" ]; then
-    local confirm
-    read -p "Do you want to remove global gv installation at $global_gv? (y/n) " confirm
-
-    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-      info "Removing global gv installation"
-
-      # Remove executable
-      rm -f "$global_gv"
-
-      # Remove git-vault alias if it exists
-      if command_exists git-vault; then
-        local git_vault_path=$(which git-vault)
-        rm -f "$git_vault_path"
-        info "Removed git-vault alias from $git_vault_path"
-      fi
-
-      success "Global gv installation removed"
+    info "Calling the gv binary to handle uninstallation"
+    if gv uninstall; then
+      success "Uninstallation completed by the gv binary"
+    else
+      error "Uninstallation via gv binary failed, please try again"
     fi
   else
-    info "No global gv installation found"
+    error "The gv binary was not found in your PATH. Make sure git-vault is installed before trying to uninstall it."
   fi
 }
 
-# Parse command line arguments
 parse_args() {
-  # Default values
   SHOULD_UNINSTALL=false
   SPECIFIED_VERSION=""
-  EXTRA_ARGS=""
   LOCAL_ZIP=""
+  VERBOSE=false
 
-  # Parse arguments
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --version|-V)
@@ -542,14 +501,13 @@ parse_args() {
         print_help
         exit 0
         ;;
-      --global|-g)
-        # Just pass the --global flag to the binary if specified
-        EXTRA_ARGS="--global"
-        shift
-        ;;
       --local-zip)
         LOCAL_ZIP="$2"
         shift 2
+        ;;
+      --verbose|-v)
+        VERBOSE=true
+        shift
         ;;
       *)
         warning "Unknown option: $1"
@@ -559,38 +517,13 @@ parse_args() {
   done
 }
 
-# Print help message
-print_help() {
-  echo "git-vault installer"
-  echo ""
-  echo "Usage: ./install.sh [options]"
-  echo ""
-  echo "Options:"
-  echo "  --version, -V VERSION  Install specific version (e.g., v0.1.0)"
-  echo "  --uninstall, -u        Uninstall git-vault"
-  echo "  --local-zip PATH       Use local zip file (for testing)"
-  echo "  --help, -h             Show this help message"
-  echo ""
-  echo "Description:"
-  echo "  This script downloads and installs git-vault, a tool for securely"
-  echo "  storing sensitive files in Git repositories using GPG encryption."
-  echo ""
-  echo "Examples:"
-  echo "  ./install.sh                         # Install git-vault"
-  echo "  ./install.sh --version v0.1.0        # Install specific version"
-  echo "  ./install.sh --uninstall             # Remove git-vault"
-  echo "  ./install.sh --local-zip ./path.zip  # Use local zip file"
-}
-
-# Main function
 main() {
-  # DEBUG: Print arguments
-  echo "DEBUG: Script arguments: $@"
-
-  # Parse arguments
   parse_args "$@"
 
-  # Handle uninstall if requested
+  if [ "$VERBOSE" = "true" ]; then
+    set -x
+  fi
+
   if [ "$SHOULD_UNINSTALL" = "true" ]; then
     uninstall_git_vault
     exit 0
@@ -598,14 +531,11 @@ main() {
 
   info "Starting gv installation"
 
-  # Check dependencies
   check_dependencies
 
-  # Detect platform
   PLATFORM=$(detect_platform)
   info "Detected platform: $PLATFORM"
 
-  # Get version to install (specified or latest)
   VERSION="$SPECIFIED_VERSION"
   if [ -z "$VERSION" ] && [ -z "$LOCAL_ZIP" ]; then
     VERSION=$(get_latest_version)
@@ -614,13 +544,10 @@ main() {
     info "Installing specified version: $VERSION"
   fi
 
-  echo "DEBUG: About to check for existing gv installation"
-  # Check if git-vault is already installed
   CURRENT_VERSION=$(check_installed_version)
   if [ -n "$CURRENT_VERSION" ] && [ -z "$LOCAL_ZIP" ]; then
     info "Found existing gv installation: $CURRENT_VERSION"
 
-    # Compare versions
     compare_versions "$VERSION" "$CURRENT_VERSION"
     COMP_RESULT=$?
 
@@ -640,20 +567,22 @@ main() {
       fi
     else
       info "A newer version ($VERSION) is available"
-      read -p "Do you want to upgrade from $CURRENT_VERSION to $VERSION? (y/n) " UPGRADE
-      if [ "$UPGRADE" != "y" ] && [ "$UPGRADE" != "Y" ]; then
-        info "Installation cancelled"
-        exit 0
+      if [ "$INTERACTIVE" = "true" ]; then
+        read -p "Do you want to upgrade from $CURRENT_VERSION to $VERSION? (y/n) " UPGRADE
+        if [ "$UPGRADE" != "y" ] && [ "$UPGRADE" != "Y" ]; then
+          info "Installation cancelled"
+          exit 0
+        fi
+      else
+        info "Non-interactive mode: automatically upgrading from $CURRENT_VERSION to $VERSION"
       fi
     fi
   fi
 
-  echo "DEBUG: About to download and run"
-  # Download and run git-vault
-  download_and_run "$PLATFORM" "$VERSION" "$EXTRA_ARGS" "$LOCAL_ZIP"
+  download_and_install "$PLATFORM" "$VERSION" "$LOCAL_ZIP"
 
   success "gv installation completed!"
+  info "You can now use 'gv init' to initialize git-vault in your Git repositories"
 }
 
-# Execute main function
 main "$@"

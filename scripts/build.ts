@@ -1,8 +1,8 @@
 #!/usr/bin/env -S deno run --allow-all
 
 /**
- * @module compile
- * @description Compiles git-vault into native binaries for all platforms
+ * @module build
+ * @description Builds gv into native binaries for all platforms
  *
  * This script uses the Deno compile command to create platform-specific binaries
  * and then compresses them into archives for distribution.
@@ -13,34 +13,44 @@
  *                      Example: deno run -A scripts/build.ts --bin-path=./dist
  */
 
-import { join } from '@std/path/join'
+import { join } from '@std/path'
 import { ensureDir } from '@std/fs'
-import { parseArgs } from '@std/cli/parse-args'
+import { parseArgs } from '@std/cli'
 
-// The target platforms supported by Deno compile
+// Define targets for cross-compilation
 const TARGETS = [
   'x86_64-unknown-linux-gnu',
   'aarch64-unknown-linux-gnu',
-  'x86_64-pc-windows-msvc',
   'x86_64-apple-darwin',
   'aarch64-apple-darwin',
+  'x86_64-pc-windows-msvc',
 ]
 
-// Additional files to include in the archive
+// Files to include in the distribution alongside the binary
 const ADDITIONAL_FILES = [
-  'README.md',
   'LICENSE',
+  'README.md',
   'install.sh',
 ]
+
+// Platform mappings for creating "latest" files
+const PLATFORM_MAPPINGS = {
+  'linux': 'x86_64-unknown-linux-gnu',
+  'linux-arm': 'aarch64-unknown-linux-gnu',
+  'windows': 'x86_64-pc-windows-msvc',
+  'macos': 'x86_64-apple-darwin',
+  'macos-arm': 'aarch64-apple-darwin',
+}
 
 interface CompileOptions {
   binPath: string
 }
 
 async function compress(files: string[], outputPath: string, isTarGz = false) {
+  // For tar.gz, we need to use tar command
   if (isTarGz) {
-    // Create tar.gz archive
-    const tempDir = await Deno.makeTempDir()
+    // Create a temporary directory
+    const tempDir = await Deno.makeTempDir({ prefix: 'git-vault-build-' })
 
     // Copy all files to temp directory
     for (const file of files) {
@@ -89,8 +99,8 @@ async function compile({ binPath }: CompileOptions) {
   console.log('Compiling binaries for all platforms...')
 
   for (const target of TARGETS) {
-    const isWindows = target.includes('windows')
-    const binaryName = `gv-${target}${isWindows ? '.exe' : ''}`
+    const isWindowsTarget = target.includes('windows')
+    const binaryName = `gv-${target}${isWindowsTarget ? '.exe' : ''}`
     const outputFile = join(binPath, binaryName)
 
     try {
@@ -117,7 +127,7 @@ async function compile({ binPath }: CompileOptions) {
     ]
 
     // Add icon only for Windows builds
-    if (isWindows) {
+    if (isWindowsTarget) {
       compileArgs.push('--icon', join(Deno.cwd(), 'logo.ico'))
     }
 
@@ -189,18 +199,10 @@ async function compile({ binPath }: CompileOptions) {
 }
 
 async function createLatestSymlinks(binPath: string) {
-  const platforms = {
-    'linux': 'x86_64-unknown-linux-gnu',
-    'linux-arm': 'aarch64-unknown-linux-gnu',
-    'windows': 'x86_64-pc-windows-msvc',
-    'macos': 'x86_64-apple-darwin',
-    'macos-arm': 'aarch64-apple-darwin',
-  }
-
-  for (const [platform, target] of Object.entries(platforms)) {
-    const isWindows = platform === 'windows'
-    const originalBinary = `gv-${target}${isWindows ? '.exe' : ''}`
-    const latestBinary = `gv-${platform}${isWindows ? '.exe' : ''}`
+  for (const [platform, target] of Object.entries(PLATFORM_MAPPINGS)) {
+    const isWindowsTarget = platform === 'windows'
+    const originalBinary = `gv-${target}${isWindowsTarget ? '.exe' : ''}`
+    const latestBinary = `gv-${platform}${isWindowsTarget ? '.exe' : ''}`
     const originalArchive = `${originalBinary}.zip`
     const latestArchive = `${latestBinary}.zip`
     const originalTarGz = `${originalBinary}.tar.gz`

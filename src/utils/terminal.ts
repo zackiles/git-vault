@@ -1,9 +1,5 @@
 /**
- * Terminal utility functions for git-vault
- *
- * This file provides functions for interacting with the terminal,
- * including handling CLI arguments, prompting for user input, and
- * displaying formatted output.
+ * Terminal utility functions for gv
  */
 
 import { parseArgs, promptSecret } from '@std/cli'
@@ -17,26 +13,13 @@ import { bold, dim, green, red, yellow } from '@std/fmt/colors'
 import type { Command } from '../types.ts'
 
 /**
- * Check if we're in a non-interactive environment (CI, testing, etc.)
- */
-function isNonInteractive(): boolean {
-  return Deno.env.get('NON_INTERACTIVE') === 'true' || Deno.env.get('CI') === 'true'
-}
-
-/**
  * Confirms an action with the user
  *
  * @param message The confirmation message
  * @param defaultYes Whether the default action is yes
- * @returns Promise that resolves to true if confirmed, false otherwise
+ * @returns True if confirmed, false otherwise
  */
 function confirm(message: string, defaultYes = false): boolean {
-  // In non-interactive mode, use the default value
-  if (isNonInteractive()) {
-    console.log(`${message} (Auto-selected: ${defaultYes ? 'Yes' : 'No'} in non-interactive mode)`)
-    return defaultYes
-  }
-
   const values = defaultYes ? ['Yes', 'No'] : ['No', 'Yes']
   const options: PromptSelectOptions = { indicator: '>', visibleLines: 2 }
   const response = promptSelect(message, values, options)
@@ -48,16 +31,20 @@ function confirm(message: string, defaultYes = false): boolean {
  *
  * @param message The prompt message
  * @param defaultValue Default value to use if user enters nothing
- * @returns Promise that resolves to the user's input
+ * @returns The user's input
  */
 function promptInput(message: string, defaultValue = ''): string {
-  // In non-interactive mode, use the default value
-  if (isNonInteractive()) {
-    console.log(`${message} (Auto-selected: ${defaultValue} in non-interactive mode)`)
-    return defaultValue
-  }
-
   return prompt(message, defaultValue) || defaultValue
+}
+
+/**
+ * Prompts the user for a password securely
+ *
+ * @param message The prompt message
+ * @returns The entered password, guaranteed to be a string (never null)
+ */
+function safePromptPassword(message: string): string {
+  return promptSecret(message) || ''
 }
 
 /**
@@ -140,9 +127,15 @@ function printHelp(commands: Command[]): void {
  * Prints an error message
  *
  * @param message The error message
+ * @param error Optional error instance to display details from
  */
-function error(message: string): void {
-  console.error(red(`Error: ${message}`))
+function error(message: string, error?: unknown): void {
+  const errorDetails = error instanceof Error
+    ? `: ${error.message}`
+    : error
+    ? `: ${String(error)}`
+    : ''
+  console.error(red(`Error: ${message}${errorDetails}`))
 }
 
 /**
@@ -155,52 +148,31 @@ function success(message: string): void {
 }
 
 /**
- * Prompt the user to select from multiple options
- *
- * Wraps promptSelect with non-interactive support
+ * Prompt the user to select from multiple options, with null safety
  */
 function safePromptSelect(
   message: string,
   options: string[],
   selectOptions?: PromptSelectOptions,
 ): string {
-  // In non-interactive environments, return the first option
-  if (isNonInteractive()) {
-    const selectedOption = options[0] || ''
-    console.log(`${message} (Auto-selected: ${selectedOption} in non-interactive mode)`)
-    return selectedOption
-  }
-
   const result = promptSelect(message, options, selectOptions)
   return (result ?? options[0]) || ''
 }
 
 /**
- * Prompt the user to select multiple options
- *
- * Wraps promptMultipleSelect with non-interactive support
+ * Prompt the user to select multiple options, with null safety
  */
 function safePromptMultipleSelect(
   message: string,
   options: string[],
 ): string[] {
-  // In non-interactive environments, return the first option
-  if (isNonInteractive()) {
-    const selectedOptions = options.length ? [options[0]] : []
-    console.log(
-      `${message} (Auto-selected: ${selectedOptions.join(', ')} in non-interactive mode)`,
-    )
-    return selectedOptions
-  }
-
-  // Call the original function with only the parameters it accepts
   const result = promptMultipleSelect(message, options)
   return result ?? (options.length ? [options[0]] : [])
 }
 
-const terminal = {
+export default {
   parseArgs,
-  promptPassword: promptSecret,
+  promptPassword: safePromptPassword,
   confirm,
   promptInput,
   printCommandHelp,
@@ -211,7 +183,4 @@ const terminal = {
   createProgressBar,
   promptSelect: safePromptSelect,
   promptMultipleSelect: safePromptMultipleSelect,
-  isNonInteractive,
 }
-
-export default terminal

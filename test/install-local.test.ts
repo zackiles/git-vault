@@ -1,11 +1,9 @@
 import { copy, ensureDir, exists } from '@std/fs'
 import { dirname, fromFileUrl, join } from '@std/path'
+import { setupTestEnvironment } from './mocks/test-utils.ts'
+import { PATHS } from '../src/paths.ts'
 
-// The test will:
-// 1. Build a zip using build.ts in a temp directory
-// 2. Copy install.sh to the temp directory
-// 3. Run install.sh with the local zip
-// 4. Validate that it extracts and starts the binary
+const isWindows = Deno.build.os === 'windows'
 
 Deno.test('install.sh can use a local zip file', {
   permissions: {
@@ -19,6 +17,7 @@ Deno.test('install.sh can use a local zip file', {
   sanitizeResources: false,
   sanitizeExit: false,
 }, async () => {
+  const testEnv = setupTestEnvironment()
   console.log('================ TEST STARTED ================')
 
   // Create temp directory for test
@@ -92,17 +91,17 @@ Deno.test('install.sh can use a local zip file', {
 
     switch (Deno.build.os) {
       case 'linux':
-        platformZip = join(binDir, 'git-vault-linux.zip')
+        platformZip = join(binDir, 'gv-linux.zip')
         break
       case 'darwin':
         if (Deno.build.arch === 'aarch64') {
-          platformZip = join(binDir, 'git-vault-macos-arm.zip')
+          platformZip = join(binDir, 'gv-macos-arm.zip')
         } else {
-          platformZip = join(binDir, 'git-vault-macos.zip')
+          platformZip = join(binDir, 'gv-macos.zip')
         }
         break
       case 'windows':
-        platformZip = join(binDir, 'git-vault-windows.zip')
+        platformZip = join(binDir, 'gv-windows.exe.zip')
         break
       default:
         throw new Error(`Unsupported platform: ${Deno.build.os}`)
@@ -119,7 +118,19 @@ Deno.test('install.sh can use a local zip file', {
     // Copy install.sh to temp directory
     const tempInstall = join(tempDir, 'install.sh')
     await copy(installScript, tempInstall)
-    await Deno.chmod(tempInstall, 0o755) // Make executable
+    if (!isWindows) {
+      await Deno.chmod(tempInstall, 0o755) // Make executable
+    } else {
+      // On Windows, use Deno.Command to set executable permissions
+      try {
+        await new Deno.Command('attrib', {
+          args: ['+x', tempInstall],
+          stderr: 'null',
+        }).output()
+      } catch {
+        console.warn(`Could not set executable permissions for ${tempInstall} on Windows`)
+      }
+    }
     console.log(`Copied install.sh to ${tempInstall}`)
     console.log(`Temp install.sh exists: ${await exists(tempInstall)}`)
 
@@ -129,16 +140,42 @@ Deno.test('install.sh can use a local zip file', {
       console.log(`  - ${entry.name} (${entry.isFile ? 'file' : 'directory'})`)
     }
 
-    console.log('Running install.sh with local zip...')
-    console.log(`Running command: ${tempInstall} --local-zip ${platformZip}`)
+    // Set up test-specific HOME directory to test global installation
+    const testHome = join(tempDir, 'home')
+    await ensureDir(testHome)
+    const testBinDir = join(testHome, '.local', 'bin')
+    await ensureDir(testBinDir)
 
     // Run install.sh with the local zip
-    const installProcess = new Deno.Command(tempInstall, {
-      args: ['--local-zip', platformZip],
+    let installCommand: string[]
+    const installEnv: Record<string, string> = { HOME: testHome }
+
+    if (isWindows) {
+      // On Windows, we'll use bash from Git for Windows or WSL if available
+      try {
+        // Try to run via bash (Git Bash, WSL, or other bash on Windows)
+        installCommand = ['bash', tempInstall, '--local-zip', platformZip]
+      } catch {
+        console.log('Bash not available on Windows, test may fail')
+        // Fallback, though this likely won't work without bash
+        installCommand = [tempInstall, '--local-zip', platformZip]
+      }
+    } else {
+      // On Unix systems
+      installCommand = [tempInstall, '--local-zip', platformZip]
+    }
+
+    console.log('Running install.sh with local zip...')
+    console.log(`Running command: ${installCommand.join(' ')}`)
+
+    // Run the installation command
+    const installProcess = new Deno.Command(installCommand[0], {
+      args: installCommand.slice(1),
       stdout: 'piped',
       stderr: 'piped',
       stdin: 'null',
       cwd: tempDir,
+      env: installEnv,
     })
 
     // Start install process
@@ -293,15 +330,21 @@ Deno.test('install.sh can use a local zip file', {
       console.log('Process may have already terminated:', String(err))
     }
 
-    // Quick check of temporary directory contents after installation attempt
-    addDebugTimestamp('Checking temp directory contents after installation attempt')
-    console.log('Temp directory contents after installation:')
-    try {
-      for await (const entry of Deno.readDir(tempDir)) {
-        console.log(`  - ${entry.name} (${entry.isFile ? 'file' : 'directory'})`)
-      }
-    } catch (err) {
-      console.error(`Error listing temp directory: ${String(err)}`)
+    // Check if the binary was installed to the expected location
+    const expectedBinaryName = PATHS.BINARY_NAME
+    const expectedBinaryPath = join(testBinDir, expectedBinaryName)
+    const binaryInstalled = await exists(expectedBinaryPath)
+
+    addDebugTimestamp(
+      `Checking if binary was installed to ${expectedBinaryPath}: ${binaryInstalled}`,
+    )
+    console.log(`Binary installed to ${expectedBinaryPath}: ${binaryInstalled}`)
+
+    // Check test HOME directory structure
+    addDebugTimestamp('Checking test HOME directory structure')
+    console.log('Test HOME directory structure:')
+    for await (const entry of Deno.readDir(testHome)) {
+      console.log(`  - ${entry.name} (${entry.isFile ? 'file' : 'directory'})`)
     }
 
     // Wait a moment to ensure all cleanup happens
@@ -340,8 +383,8 @@ Deno.test('install.sh can use a local zip file', {
     if (stdoutContent.includes('Using local zip file')) {
       console.log("PASS: Found 'Using local zip file' in stdout")
       testPassed = true
-    } else if (stdoutContent.includes('Starting git-vault installation')) {
-      console.log("PASS: Found 'Starting git-vault installation' in stdout")
+    } else if (stdoutContent.includes('Installing gv')) {
+      console.log("PASS: Found 'Installing gv' in stdout")
       testPassed = true
     } else if (stdoutContent.length > 0) {
       console.log('PASS: Script produced some stdout output')
@@ -360,6 +403,7 @@ Deno.test('install.sh can use a local zip file', {
       throw new Error('The install.sh script did not produce expected output')
     }
   } finally {
+    testEnv.restore()
     console.log('Cleanup phase started')
     // Clean up temp directory
     try {

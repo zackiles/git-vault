@@ -13,6 +13,8 @@
  * Note: (Optional): You can call panic(errorOrMessage) to trigger a custom shutdown and exit with a non-zero exit code.
  */
 
+const isWindows = Deno.build.os === 'windows'
+
 type ShutdownLogger = Record<
   'debug' | 'info' | 'warn' | 'error' | 'log',
   (message: string, ...args: unknown[]) => void
@@ -34,7 +36,7 @@ class GracefulShutdown {
     // Standard signals across platforms
     this.signals = ['SIGINT', 'SIGTERM']
     // Platform specific signals
-    if (Deno.build.os === 'windows') {
+    if (isWindows) {
       this.signals.push('SIGBREAK')
     } else {
       this.signals.push('SIGHUP', 'SIGQUIT')

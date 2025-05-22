@@ -55,7 +55,14 @@
     "choco",
     "dryrun",
     "apikey",
-    "shasums"
-
+    "shasums",
+    "unmatch",
+    "linuxbrew",
+    "programdata",
+    "peasy",
+    "certutil",
+    "hashfile",
+    "doesnt",
+    "LOCALAPPDATA'"
   ],
 }

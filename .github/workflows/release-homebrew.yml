@@ -1,4 +1,4 @@
-name: Update Homebrew Tap
+name: Homebrew Tap Release
 
 on:
   workflow_run:
@@ -79,23 +79,23 @@ jobs:
           echo "Downloading gv-linux-arm.tar.gz..."
           gh release download "$TAG" -p "gv-linux-arm.tar.gz" -D dist/ || { echo "Failed to download gv-linux-arm.tar.gz"; exit 1; }
 
-          echo "All files downloaded successfully. Renaming files..."
+          echo "All files downloaded successfully."
 
-          # Rename to match Homebrew conventions
-          mv dist/gv-macos.tar.gz dist/git-vault-macos.tar.gz
-          mv dist/gv-macos-arm.tar.gz dist/git-vault-macos-arm64.tar.gz
-          mv dist/gv-linux.tar.gz dist/git-vault-linux.tar.gz
-          mv dist/gv-linux-arm.tar.gz dist/git-vault-linux-arm64.tar.gz
+          # No need to rename files anymore
+          cp dist/gv-macos.tar.gz dist/gv-macos-x86_64.tar.gz
+          cp dist/gv-macos-arm.tar.gz dist/gv-macos-arm64.tar.gz
+          cp dist/gv-linux.tar.gz dist/gv-linux-x86_64.tar.gz
+          cp dist/gv-linux-arm.tar.gz dist/gv-linux-arm64.tar.gz
 
           echo "All files renamed successfully."
 
       - name: Compute SHA256 hashes
         id: shasums
         run: |
-          MAC_INTEL_SHA=$(shasum -a 256 dist/git-vault-macos.tar.gz | awk '{print $1}')
-          MAC_ARM_SHA=$(shasum -a 256 dist/git-vault-macos-arm64.tar.gz | awk '{print $1}')
-          LINUX_SHA=$(shasum -a 256 dist/git-vault-linux.tar.gz | awk '{print $1}')
-          LINUX_ARM_SHA=$(shasum -a 256 dist/git-vault-linux-arm64.tar.gz | awk '{print $1}')
+          MAC_INTEL_SHA=$(shasum -a 256 dist/gv-macos-x86_64.tar.gz | awk '{print $1}')
+          MAC_ARM_SHA=$(shasum -a 256 dist/gv-macos-arm64.tar.gz | awk '{print $1}')
+          LINUX_SHA=$(shasum -a 256 dist/gv-linux-x86_64.tar.gz | awk '{print $1}')
+          LINUX_ARM_SHA=$(shasum -a 256 dist/gv-linux-arm64.tar.gz | awk '{print $1}')
           echo "MAC_INTEL_SHA=$MAC_INTEL_SHA" >> $GITHUB_OUTPUT
           echo "MAC_ARM_SHA=$MAC_ARM_SHA" >> $GITHUB_OUTPUT
           echo "LINUX_SHA=$LINUX_SHA" >> $GITHUB_OUTPUT
@@ -106,7 +106,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG=${{ steps.release.outputs.TAG }}
-          gh release upload $TAG dist/git-vault-macos.tar.gz dist/git-vault-macos-arm64.tar.gz dist/git-vault-linux.tar.gz dist/git-vault-linux-arm64.tar.gz --clobber
+          gh release upload $TAG dist/gv-macos-x86_64.tar.gz dist/gv-macos-arm64.tar.gz dist/gv-linux-x86_64.tar.gz dist/gv-linux-arm64.tar.gz --clobber
 
       - name: Checkout homebrew-git-vault tap repo
         uses: actions/checkout@v4
@@ -129,20 +129,20 @@ jobs:
 
             on_macos do
               if Hardware::CPU.arm?
-                url "https://github.com/zackiles/git-vault/releases/download/${TAG}/git-vault-macos-arm64.tar.gz"
+                url "https://github.com/zackiles/git-vault/releases/download/${TAG}/gv-macos-arm64.tar.gz"
                 sha256 "${MAC_ARM_SHA}"
               else
-                url "https://github.com/zackiles/git-vault/releases/download/${TAG}/git-vault-macos.tar.gz"
+                url "https://github.com/zackiles/git-vault/releases/download/${TAG}/gv-macos-x86_64.tar.gz"
                 sha256 "${MAC_INTEL_SHA}"
               end
             end
 
             on_linux do
               if Hardware::CPU.arm?
-                url "https://github.com/zackiles/git-vault/releases/download/${TAG}/git-vault-linux-arm64.tar.gz"
+                url "https://github.com/zackiles/git-vault/releases/download/${TAG}/gv-linux-arm64.tar.gz"
                 sha256 "${LINUX_ARM_SHA}"
               else
-                url "https://github.com/zackiles/git-vault/releases/download/${TAG}/git-vault-linux.tar.gz"
+                url "https://github.com/zackiles/git-vault/releases/download/${TAG}/gv-linux-x86_64.tar.gz"
                 sha256 "${LINUX_SHA}"
               end
             end
@@ -162,13 +162,10 @@ jobs:
                   bin.install "gv-x86_64-unknown-linux-gnu" => "gv"
                 end
               end
-
-              # Create git-vault symlink for backward compatibility
-              bin.install_symlink "gv" => "git-vault"
             end
 
             test do
-              assert_match version.to_s, shell_output("#{bin}/git-vault --version")
+              assert_match version.to_s, shell_output("#{bin}/gv --version")
             end
           end
           EOFORMULA

@@ -1,46 +1,26 @@
 /**
  * Test suite for the remove command
- *
- * These tests are primarily integration tests that interact with the real file system
- * and external commands like git, gpg, etc.
- *
- * To run these tests, you need to have the following installed:
- * - Git
- * - GPG
- *
- * Optional for specific tests:
- * - 1Password CLI (for 1Password integration tests)
- * - Git LFS (for LFS integration tests)
- *
- * Running the tests:
- * - Most tests are disabled by default to avoid unintentional side effects
- * - Enable integration tests: RUN_INTEGRATION_TESTS=true deno task test test/remove.test.ts
- * - Enable 1Password tests: HAS_1PASSWORD_CLI=true RUN_INTEGRATION_TESTS=true deno task test
- * - Enable Git LFS tests: HAS_GIT_LFS=true RUN_INTEGRATION_TESTS=true deno task test
  */
 
 import { assert, assertEquals } from 'jsr:@std/assert'
-import { join } from '@std/path'
+import { basename, dirname, join, relative } from '@std/path'
 import { exists } from '@std/fs'
 import add from '../src/commands/add.ts'
-import init from '../src/commands/init.ts'
+import { initializeVault } from '../src/utils/initialize-vault.ts'
 import remove from '../src/commands/remove.ts'
+import { setupTestEnvironment } from './mocks/test-utils.ts'
 
-// Reuse utility functions from add.test.ts
 async function createTempGitRepo(): Promise<{ path: string; cleanup: () => Promise<void> }> {
   const tempDir = await Deno.makeTempDir({ prefix: 'git-vault-test-' })
 
-  // Initialize git repository
   const gitInit = new Deno.Command('git', {
     args: ['init'],
     cwd: tempDir,
   })
   await gitInit.output()
 
-  // Create a dummy file and commit it
-  await Deno.writeTextFile(`${tempDir}/README.md`, '# Test Repository')
+  await Deno.writeTextFile(join(tempDir, 'README.md'), '# Test Repository')
 
-  // Set git user and email for the test repository
   const gitConfig = new Deno.Command('git', {
     args: ['config', 'user.name', 'Test User'],
     cwd: tempDir,
@@ -53,7 +33,6 @@ async function createTempGitRepo(): Promise<{ path: string; cleanup: () => Promi
   })
   await gitConfigEmail.output()
 
-  // Initial commit
   const gitAdd = new Deno.Command('git', {
     args: ['add', 'README.md'],
     cwd: tempDir,
@@ -87,11 +66,9 @@ async function createTestFiles(repoPath: string): Promise<{
   directoryPath: string
   nestedFilePath: string
 }> {
-  // Create a test file
   const filePath = join(repoPath, 'secret.txt')
   await Deno.writeTextFile(filePath, 'This is a secret file')
 
-  // Create a test directory with a nested file
   const directoryPath = join(repoPath, 'secret-dir')
   await Deno.mkdir(directoryPath)
 
@@ -108,7 +85,6 @@ async function verifyFileRemoved(repoPath: string, relativePath: string) {
   const gitVaultDir = join(repoPath, '.vault')
   const configPath = join(gitVaultDir, 'config.json')
 
-  // Check config doesn't contain the path
   if (await exists(configPath)) {
     const configContent = await Deno.readTextFile(configPath)
     const config = JSON.parse(configContent)
@@ -118,17 +94,14 @@ async function verifyFileRemoved(repoPath: string, relativePath: string) {
     assert(!pathFound, `config.json should not contain ${relativePath}`)
   }
 
-  // Check that the archive was removed
   const archiveName = relativePath.replaceAll('/', '-')
   const archivePath = join(gitVaultDir, 'storage', `${archiveName}.tar.gz.gpg`)
   assert(!await exists(archivePath), `Archive ${archivePath} should not exist`)
 
-  // Original file should still exist
   const originalPath = join(repoPath, relativePath)
   assert(await exists(originalPath), `Original file ${originalPath} should still exist`)
 }
 
-// Set up test environment before running remove tests
 async function setupGitVaultRepoWithFile(): Promise<{
   repoPath: string
   cleanup: () => Promise<void>
@@ -140,51 +113,41 @@ async function setupGitVaultRepoWithFile(): Promise<{
 }> {
   const { path, cleanup } = await createTempGitRepo()
 
-  // Install git-vault in the repo
-  await init.run({ _: [], workspace: path })
-
-  // Create test files
+  await initializeVault(path)
   const testFiles = await createTestFiles(path)
 
-  // Add a file to git-vault
-  console.log('Setting up test file - enter "testpassword" when prompted')
-  await add.run({ _: [testFiles.filePath], workspace: path })
+  await add({ _: [testFiles.filePath], workspace: path })
 
   return { repoPath: path, cleanup, testFiles: testFiles }
 }
 
-// Basic file removal test
 Deno.test({
   name: 'remove: basic file removal integration test',
-  ignore: Deno.env.get('RUN_INTEGRATION_TESTS') !== 'true', // Skip unless explicitly enabled
   async fn() {
+    const testEnv = setupTestEnvironment()
     const { repoPath, cleanup, testFiles } = await setupGitVaultRepoWithFile()
 
     try {
-      // Remove the file
-      await remove.run({ _: [testFiles.filePath], workspace: repoPath })
+      await remove({ _: [testFiles.filePath], workspace: repoPath })
 
-      // Assert
-      const relativePath = 'secret.txt' // Relative to repo root
+      const relativePath = 'secret.txt'
       await verifyFileRemoved(repoPath, relativePath)
     } finally {
+      testEnv.restore()
       await cleanup()
     }
   },
 })
 
-// Test removing file that isn't managed
 Deno.test({
   name: 'remove: attempt to remove unmanaged file',
-  ignore: Deno.env.get('RUN_INTEGRATION_TESTS') !== 'true', // Skip unless explicitly enabled
   async fn() {
+    const testEnv = setupTestEnvironment()
     const { repoPath, cleanup, testFiles } = await setupGitVaultRepoWithFile()
 
     try {
-      // Try to remove an unmanaged file - use the nested file since it wasn't added to git-vault
       const unmanaged = testFiles.nestedFilePath
 
-      // Get initial config state
       const configPath = join(repoPath, '.vault', 'config.json')
       let initialConfig = null
       if (await exists(configPath)) {
@@ -192,10 +155,8 @@ Deno.test({
         initialConfig = JSON.parse(initialConfigContent)
       }
 
-      // Try to remove unmanaged file
-      await remove.run({ _: [unmanaged], workspace: repoPath })
+      await remove({ _: [unmanaged], workspace: repoPath })
 
-      // Verify config didn't change
       let finalConfig = null
       if (await exists(configPath)) {
         const finalConfigContent = await Deno.readTextFile(configPath)
@@ -208,26 +169,23 @@ Deno.test({
         'Config should not change when removing an unmanaged file',
       )
 
-      // Verify file still exists
       assert(await exists(unmanaged), 'Unmanaged file should still exist')
     } finally {
+      testEnv.restore()
       await cleanup()
     }
   },
 })
 
-// Test removing file that doesn't exist
 Deno.test({
   name: 'remove: attempt to remove non-existent file',
-  ignore: Deno.env.get('RUN_INTEGRATION_TESTS') !== 'true', // Skip unless explicitly enabled
   async fn() {
+    const testEnv = setupTestEnvironment()
     const { repoPath, cleanup } = await setupGitVaultRepoWithFile()
 
     try {
-      // Try to remove a non-existent file
       const nonExistentPath = join(repoPath, 'doesnt-exist.txt')
 
-      // Get initial config state
       const configPath = join(repoPath, '.vault', 'config.json')
       let initialConfig = null
       if (await exists(configPath)) {
@@ -235,10 +193,8 @@ Deno.test({
         initialConfig = JSON.parse(initialConfigContent)
       }
 
-      // Try to remove non-existent file
-      await remove.run({ _: [nonExistentPath], workspace: repoPath })
+      await remove({ _: [nonExistentPath], workspace: repoPath })
 
-      // Verify config didn't change
       let finalConfig = null
       if (await exists(configPath)) {
         const finalConfigContent = await Deno.readTextFile(configPath)
@@ -251,30 +207,230 @@ Deno.test({
         'Config should not change when removing a non-existent file',
       )
     } finally {
+      testEnv.restore()
       await cleanup()
     }
   },
 })
 
-// Test removing a directory
 Deno.test({
   name: 'remove: directory removal integration test',
-  ignore: Deno.env.get('RUN_INTEGRATION_TESTS') !== 'true', // Skip unless explicitly enabled
   async fn() {
+    const testEnv = setupTestEnvironment()
     const { repoPath, cleanup, testFiles } = await setupGitVaultRepoWithFile()
 
     try {
-      // First add the directory
-      console.log('Adding directory - enter "testpassword" when prompted')
-      await add.run({ _: [testFiles.directoryPath], workspace: repoPath })
+      await add({ _: [testFiles.directoryPath], workspace: repoPath })
+      await remove({ _: [testFiles.directoryPath], workspace: repoPath })
 
-      // Then remove it
-      await remove.run({ _: [testFiles.directoryPath], workspace: repoPath })
-
-      // Assert
-      const relativePath = 'secret-dir/' // Relative to repo root
+      const relativePath = 'secret-dir/'
       await verifyFileRemoved(repoPath, relativePath)
     } finally {
+      testEnv.restore()
+      await cleanup()
+    }
+  },
+})
+
+Deno.test({
+  name: 'remove: handles paths with special characters',
+  async fn() {
+    const testEnv = setupTestEnvironment()
+    const { repoPath, cleanup } = await setupGitVaultRepoWithFile()
+
+    try {
+      // Create and add files with special characters
+      const specialPaths = [
+        join(repoPath, 'file with spaces.txt'),
+        join(repoPath, 'file-with-dashes.txt'),
+        join(repoPath, 'file_with_underscores.txt'),
+        join(repoPath, 'file.with.dots.txt'),
+        join(repoPath, '@file-with-at.txt'),
+        join(repoPath, '#file-with-hash.txt'),
+        join(repoPath, '$file-with-dollar.txt'),
+      ]
+
+      for (const path of specialPaths) {
+        await Deno.writeTextFile(path, 'test content')
+        await add({ _: [path], workspace: repoPath })
+        await remove({ _: [path], workspace: repoPath })
+        await verifyFileRemoved(repoPath, relative(repoPath, path))
+      }
+    } finally {
+      testEnv.restore()
+      await cleanup()
+    }
+  },
+})
+
+Deno.test({
+  name: 'remove: handles deep nested paths',
+  async fn() {
+    const testEnv = setupTestEnvironment()
+    const { repoPath, cleanup } = await setupGitVaultRepoWithFile()
+
+    try {
+      // Create and add deeply nested files and directories
+      const deepPath = join(repoPath, 'level1', 'level2', 'level3', 'level4', 'level5')
+      await Deno.mkdir(deepPath, { recursive: true })
+
+      const deepFilePath = join(deepPath, 'deep-file.txt')
+      await Deno.writeTextFile(deepFilePath, 'deep file content')
+
+      // Add and remove deep file
+      await add({ _: [deepFilePath], workspace: repoPath })
+      await remove({ _: [deepFilePath], workspace: repoPath })
+      await verifyFileRemoved(repoPath, relative(repoPath, deepFilePath))
+
+      // Add and remove deep directory
+      await add({ _: [deepPath], workspace: repoPath })
+      await remove({ _: [deepPath], workspace: repoPath })
+      await verifyFileRemoved(repoPath, `${relative(repoPath, deepPath)}/`)
+    } finally {
+      testEnv.restore()
+      await cleanup()
+    }
+  },
+})
+
+Deno.test({
+  name: 'remove: handles platform-specific paths',
+  async fn() {
+    const testEnv = setupTestEnvironment()
+    const { repoPath, cleanup } = await setupGitVaultRepoWithFile()
+
+    try {
+      // Test with platform-specific paths
+      const platformPaths = [
+        // Windows absolute paths (with drive letter)
+        Deno.build.os === 'windows'
+          ? 'C:\\Windows\\Style\\Path\\file.txt'
+          : join(repoPath, 'windows-style', 'file.txt'),
+
+        // Windows UNC paths
+        Deno.build.os === 'windows'
+          ? '\\\\server\\share\\file.txt'
+          : join(repoPath, 'unc-style', 'file.txt'),
+
+        // Unix absolute paths
+        join(repoPath, 'unix', 'style', 'path', 'file.txt'),
+
+        // Paths with mixed separators (common in Windows)
+        // Use proper join instead of hand-constructed path with mixed separators
+        join(repoPath, 'mixed', 'style', 'path', 'file.txt'),
+
+        // Paths with spaces and special chars (problematic on Windows)
+        join(repoPath, 'path with spaces', 'file (1).txt'),
+        join(repoPath, 'path_with@special#chars', '$file.txt'),
+
+        // Reserved names on Windows
+        join(repoPath, 'COM1'),
+        join(repoPath, 'PRN.txt'),
+        join(repoPath, 'aux', 'file.txt'),
+
+        // Case sensitivity tests (important for Windows vs Unix)
+        join(repoPath, 'CaseSensitive', 'File.txt'),
+        join(repoPath, 'casesensitive', 'file.txt'),
+
+        // Long paths (Windows MAX_PATH issues)
+        join(
+          repoPath,
+          'very',
+          'very',
+          'very',
+          'very',
+          'very',
+          'very',
+          'deep',
+          'path',
+          'that',
+          'might',
+          'exceed',
+          'windows',
+          'max',
+          'path',
+          'length',
+          'this',
+          'is',
+          'a',
+          'really',
+          'long',
+          'path',
+          'file.txt',
+        ),
+
+        // Trailing dots and spaces (problematic on Windows)
+        join(repoPath, 'path', 'file.'),
+        join(repoPath, 'path', 'file '),
+        join(repoPath, 'path.', 'file'),
+        join(repoPath, 'path ', 'file'),
+      ]
+
+      for (const path of platformPaths) {
+        let testPath = path
+        if (!path.startsWith(repoPath)) {
+          // For Windows-specific absolute paths, we'll create them under repoPath
+          testPath = join(repoPath, 'test-paths', basename(path))
+        }
+
+        try {
+          await Deno.mkdir(dirname(testPath), { recursive: true })
+          await Deno.writeTextFile(testPath, 'test content')
+
+          // Use the original path for the commands to test path handling
+          const pathToUse = path.startsWith(repoPath) ? path : testPath
+          await add({ _: [pathToUse], workspace: repoPath })
+          await remove({ _: [pathToUse], workspace: repoPath })
+
+          // For verification, we need the path relative to repoPath
+          const relPath = relative(repoPath, testPath)
+          // Handle path normalization properly across platforms
+          await verifyFileRemoved(repoPath, relPath.replace(/\\/g, '/'))
+        } catch (error) {
+          if (error instanceof Deno.errors.NotSupported) {
+            // Skip paths not supported on this platform
+            console.log(`Skipping unsupported path on this platform: ${path}`)
+            continue
+          }
+          throw error
+        }
+      }
+    } finally {
+      testEnv.restore()
+      await cleanup()
+    }
+  },
+})
+
+Deno.test({
+  name: 'remove: handles relative and absolute paths',
+  async fn() {
+    const testEnv = setupTestEnvironment()
+    const { repoPath, cleanup } = await setupGitVaultRepoWithFile()
+
+    try {
+      // Test relative path
+      const relativeFilePath = './relative-file.txt'
+      await Deno.writeTextFile(join(repoPath, relativeFilePath), 'relative content')
+      await add({ _: [relativeFilePath], workspace: repoPath })
+      await remove({ _: [relativeFilePath], workspace: repoPath })
+      await verifyFileRemoved(repoPath, 'relative-file.txt')
+
+      // Test absolute path
+      const absoluteFilePath = join(repoPath, 'absolute-file.txt')
+      await Deno.writeTextFile(absoluteFilePath, 'absolute content')
+      await add({ _: [absoluteFilePath], workspace: repoPath })
+      await remove({ _: [absoluteFilePath], workspace: repoPath })
+      await verifyFileRemoved(repoPath, 'absolute-file.txt')
+
+      // Test path with parent directory reference
+      const parentPath = join(repoPath, '..', basename(repoPath), 'parent-ref-file.txt')
+      await Deno.writeTextFile(parentPath, 'parent ref content')
+      await add({ _: [parentPath], workspace: repoPath })
+      await remove({ _: [parentPath], workspace: repoPath })
+      await verifyFileRemoved(repoPath, 'parent-ref-file.txt')
+    } finally {
+      testEnv.restore()
       await cleanup()
     }
   },

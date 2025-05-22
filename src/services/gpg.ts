@@ -4,12 +4,13 @@
  * This file provides functions for GPG encryption and decryption
  */
 
+import terminal from '../utils/terminal.ts'
 /**
  * Checks if GPG is installed and available
  *
  * @returns Promise that resolves to true if GPG is available
  */
-export async function isGpgAvailable(): Promise<boolean> {
+async function isGpgAvailable(): Promise<boolean> {
   try {
     const command = new Deno.Command('gpg', {
       args: ['--version'],
@@ -32,7 +33,7 @@ export async function isGpgAvailable(): Promise<boolean> {
  * @param password Password for encryption
  * @returns Promise that resolves to true if successful
  */
-export async function encryptFile(
+async function encryptFile(
   sourceFilePath: string,
   destFilePath: string,
   password: string,
@@ -40,7 +41,7 @@ export async function encryptFile(
   try {
     // Check if gpg is available
     if (!await isGpgAvailable()) {
-      console.error('GPG is not available')
+      terminal.error('GPG is not available')
       return false
     }
 
@@ -63,13 +64,13 @@ export async function encryptFile(
     const { success, stderr } = await command.output()
 
     if (!success) {
-      console.error('GPG encryption failed:', new TextDecoder().decode(stderr))
+      terminal.error('GPG encryption failed:', new Error(new TextDecoder().decode(stderr)))
       return false
     }
 
     return true
   } catch (error) {
-    console.error('Encryption error:', error instanceof Error ? error.message : String(error))
+    terminal.error('Encryption error:', error)
     return false
   }
 }
@@ -82,7 +83,7 @@ export async function encryptFile(
  * @param password Password for decryption
  * @returns Promise that resolves to true if successful
  */
-export async function decryptFile(
+async function decryptFile(
   sourceFilePath: string,
   destFilePath: string,
   password: string,
@@ -90,7 +91,7 @@ export async function decryptFile(
   try {
     // Check if gpg is available
     if (!await isGpgAvailable()) {
-      console.error('GPG is not available')
+      terminal.error('GPG is not available')
       return false
     }
 
@@ -113,13 +114,13 @@ export async function decryptFile(
     const { success, stderr } = await command.output()
 
     if (!success) {
-      console.error('GPG decryption failed:', new TextDecoder().decode(stderr))
+      terminal.error('GPG decryption failed:', new TextDecoder().decode(stderr))
       return false
     }
 
     return true
   } catch (error) {
-    console.error('Decryption error:', error instanceof Error ? error.message : String(error))
+    terminal.error('Decryption error:', error)
     return false
   }
 }
@@ -131,14 +132,14 @@ export async function decryptFile(
  * @param password Password to verify
  * @returns Promise that resolves to true if password is correct
  */
-export async function verifyPassword(
+async function verifyPassword(
   encryptedFilePath: string,
   password: string,
 ): Promise<boolean> {
   try {
     // Check if gpg is available
     if (!await isGpgAvailable()) {
-      console.error('GPG is not available')
+      terminal.error('GPG is not available')
       return false
     }
 
@@ -164,3 +165,5 @@ export async function verifyPassword(
     return false
   }
 }
+
+export { decryptFile, encryptFile, isGpgAvailable, verifyPassword }

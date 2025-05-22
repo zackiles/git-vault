@@ -1,4 +1,4 @@
-name: Release
+name: Github Release
 
 on:
   push:
@@ -29,11 +29,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gnupg zip unzip
 
-      - name: Run unit tests
+      - name: Install Git LFS
         run: |
-          # Run tests but exclude integration tests that require 1Password or other external services
-          # Use RUN_INTEGRATION_TESTS=true to run basic integration tests but NOT 1Password tests
-          deno test -A --reporter=dot test/**/*.test.ts
+          sudo apt-get install -y git-lfs
+          git lfs install
+
+      - name: Run tests
+        run: deno task test
 
   build-and-release:
     needs: test
@@ -56,6 +58,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y zip unzip tar
 
+      - name: Install Git LFS
+        run: |
+          sudo apt-get install -y git-lfs
+          git lfs install
+
       - name: Get tag name
         id: get_tag
         run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
@@ -65,8 +72,8 @@ jobs:
         run: |
           COMMIT_MSG=$(git log -1 --pretty=format:%B ${{ github.sha }})
           # Properly handle multiline commit messages for GitHub Actions
-          echo "$COMMIT_MSG" > release_notes.txt
-          echo "NOTES_FILE=release_notes.txt" >> $GITHUB_OUTPUT
+          echo "$COMMIT_MSG" > RELEASE_NOTES.txt
+          echo "NOTES_FILE=RELEASE_NOTES.txt" >> $GITHUB_OUTPUT
 
       - name: Build binaries
         run: deno task build --bin-path=./bin
