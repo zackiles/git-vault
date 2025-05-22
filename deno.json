@@ -18,8 +18,7 @@
     "http",
     "fs",
     "ffi",
-    "temporal",
-
+    "temporal"
   ],
   "imports": {
     "@std/async": "jsr:@std/async@1",

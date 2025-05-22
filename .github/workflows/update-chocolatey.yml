@@ -97,9 +97,9 @@ jobs:
           <?xml version="1.0" encoding="utf-8"?>
           <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
             <metadata>
-              <id>git-vault</id>
+              <id>gv</id>
               <version>$version</version>
-              <title>Git Vault</title>
+              <title>Git Vault (gv)</title>
               <authors>zackiles</authors>
               <projectUrl>https://github.com/zackiles/git-vault</projectUrl>
               <licenseUrl>https://github.com/zackiles/git-vault/blob/main/LICENSE</licenseUrl>
@@ -111,7 +111,7 @@ jobs:
               <file src="tools\**" target="tools" />
             </files>
           </package>
-          "@ | Out-File -Encoding utf8 -FilePath .\choco-pkg\git-vault.nuspec
+          "@ | Out-File -Encoding utf8 -FilePath .\choco-pkg\gv.nuspec
 
           # Create chocolateyInstall.ps1
           @"
@@ -121,16 +121,24 @@ jobs:
           `$zipFile = Get-ChildItem -Path `$toolsDir -Filter "gv-windows.exe.zip" | Select-Object -First 1 -ExpandProperty FullName
 
           `$packageArgs = @{
-            packageName    = 'git-vault'
+            packageName    = 'gv'
             unzipLocation  = `$toolsDir
             file           = `$zipFile
           }
 
           Get-ChocolateyUnzip @packageArgs
 
-          # Rename the binary file to git-vault.exe
-          `$exeFile = Get-ChildItem -Path `$toolsDir -Filter "gv-windows.exe" | Select-Object -First 1 -ExpandProperty FullName
-          Rename-Item -Path `$exeFile -NewName "git-vault.exe" -Force
+          # Copy the binary file to both gv.exe and git-vault.exe for compatibility
+          `$exeFile = Get-ChildItem -Path `$toolsDir -Filter "gv-x86_64-pc-windows-msvc.exe" | Select-Object -First 1 -ExpandProperty FullName
+          if (-not `$exeFile) {
+            `$exeFile = Get-ChildItem -Path `$toolsDir -Filter "gv-windows.exe" | Select-Object -First 1 -ExpandProperty FullName
+          }
+
+          # Create primary command as gv.exe
+          Copy-Item -Path `$exeFile -Destination (Join-Path `$toolsDir "gv.exe") -Force
+
+          # Also create git-vault.exe as an alias
+          Copy-Item -Path `$exeFile -Destination (Join-Path `$toolsDir "git-vault.exe") -Force
           "@ | Out-File -Encoding utf8 -FilePath .\choco-pkg\tools\chocolateyInstall.ps1
 
           # Create verification file
@@ -156,7 +164,7 @@ jobs:
         shell: powershell
         run: |
           cd choco-pkg
-          choco pack git-vault.nuspec
+          choco pack gv.nuspec
 
       - name: Push to Chocolatey.org
         if: success()
@@ -168,4 +176,4 @@ jobs:
           # Use the API key from secrets
           choco apikey --key $env:CHOCO_API_KEY --source https://push.chocolatey.org/
           # Push the package
-          choco push git-vault.${{ steps.release.outputs.VERSION }}.nupkg --source https://push.chocolatey.org/ --api-key $env:CHOCO_API_KEY
+          choco push gv.${{ steps.release.outputs.VERSION }}.nupkg --source https://push.chocolatey.org/ --api-key $env:CHOCO_API_KEY

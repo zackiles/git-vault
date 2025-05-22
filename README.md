@@ -47,13 +47,13 @@ curl -fsSL https://raw.githubusercontent.com/zackiles/git-vault/main/install.sh 
 
 ```bash
 brew tap zackiles/git-vault
-brew install git-vault
+brew install gv
 ```
 
 **Chocolatey (Windows):**
 
 ```powershell
-choco install git-vault
+choco install gv
 ```
 
 The installer downloads the correct binary, checks dependencies (git, gpg), sets up your repository, and can optionally install `gv` globally.
@@ -94,6 +94,9 @@ gv list
 ```
 
 Displays managed files/directories, status, and archive sizes.
+
+> [!TIP]
+> You can also use `git-vault` as an alias for `gv` for backward compatibility.
 
 > [!IMPORTANT]
 > Your .gitignore will be automatically updated and you're safe to commit everything including `.vault/storage/` and `.vault/config.json`)

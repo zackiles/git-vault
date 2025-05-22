@@ -151,17 +151,20 @@ jobs:
               # Install the appropriate binary based on platform
               if Hardware::CPU.arm?
                 if OS.mac?
-                  bin.install "gv-aarch64-apple-darwin" => "git-vault"
+                  bin.install "gv-aarch64-apple-darwin" => "gv"
                 else
-                  bin.install "gv-aarch64-unknown-linux-gnu" => "git-vault"
+                  bin.install "gv-aarch64-unknown-linux-gnu" => "gv"
                 end
               else
                 if OS.mac?
-                  bin.install "gv-x86_64-apple-darwin" => "git-vault"
+                  bin.install "gv-x86_64-apple-darwin" => "gv"
                 else
-                  bin.install "gv-x86_64-unknown-linux-gnu" => "git-vault"
+                  bin.install "gv-x86_64-unknown-linux-gnu" => "gv"
                 end
               end
+
+              # Create git-vault symlink for backward compatibility
+              bin.install_symlink "gv" => "git-vault"
             end
 
             test do
