@@ -5,7 +5,7 @@
   </div>
   <p>
     <a href="https://github.com/zackiles/git-vault/actions/workflows/release-github.yml">
-      <img src="https://github.com/zackiles/git-vault/actions/workflows/release.yml/badge.svg" alt="Release">
+      <img src="https://github.com/zackiles/git-vault/actions/workflows/release-github.yml/badge.svg" alt="Release">
     </a>
     <a href="https://chocolatey.org/packages/git-vault">
       <img src="https://img.shields.io/chocolatey/v/git-vault" alt="Chocolatey Version">
