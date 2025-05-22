@@ -134,7 +134,6 @@ jobs:
               <iconUrl>https://github.com/zackiles/git-vault/blob/main/logo.ico</iconUrl>
               <bugTrackerUrl>https://github.com/zackiles/git-vault/issues</bugTrackerUrl>
               <licenseUrl>https://github.com/zackiles/git-vault/blob/main/LICENSE</licenseUrl>
-              <license type="file">tools\LICENSE</license>
               <releaseNotes>tools\RELEASE_NOTES.txt</releaseNotes>
               <requireLicenseAcceptance>true</requireLicenseAcceptance>
               <description>Commit your secrets safely and effortlessly with Git using GPG. 1Password supported. Transparently encrypts files or folder on commit, decrypts on checkout. Handles Git LFS automatically for large files.</description>
