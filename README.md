@@ -11,7 +11,7 @@
       <img src="https://img.shields.io/chocolatey/v/git-vault" alt="Chocolatey Version">
     </a>
     <a href="https://github.com/zackiles/homebrew-git-vault">
-      <img src="https://img.shields.io/homebrew/v/zackiles/git-vault/git-vault" alt="Homebrew Version">
+      <img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/zackiles/homebrew-git-vault/main/version.json" alt="Homebrew Version">
     </a>
   </p>
 </div>

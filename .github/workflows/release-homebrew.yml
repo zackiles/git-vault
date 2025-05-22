@@ -177,13 +177,29 @@ jobs:
           sed -i "s/\${LINUX_SHA}/${{ steps.shasums.outputs.LINUX_SHA }}/g" tap/${{ env.FORMULA_PATH }}
           sed -i "s/\${LINUX_ARM_SHA}/${{ steps.shasums.outputs.LINUX_ARM_SHA }}/g" tap/${{ env.FORMULA_PATH }}
 
-      - name: Commit and push updated formula
+      - name: Generate version.json for shields.io badge
+        run: |
+          TAG=${{ steps.release.outputs.TAG }}
+
+          # Create version.json file for shields.io badge
+          cat > tap/version.json << EOF
+          {
+            "schemaVersion": 1,
+            "label": "homebrew",
+            "message": "$TAG",
+            "color": "blue"
+          }
+          EOF
+
+          echo "Created version.json file for shields.io badge"
+
+      - name: Commit and push updated formula and version.json
         env:
           GITHUB_TOKEN: ${{ secrets.TAP_REPO_TOKEN }}
         run: |
           cd tap
           git config user.name "GitHub Action"
           git config user.email "action@github.com"
-          git add ${{ env.FORMULA_PATH }}
-          git commit -m "Update formula for git-vault ${{ steps.release.outputs.TAG }}"
+          git add ${{ env.FORMULA_PATH }} version.json
+          git commit -m "Update formula and version.json for git-vault ${{ steps.release.outputs.TAG }}"
           git push
