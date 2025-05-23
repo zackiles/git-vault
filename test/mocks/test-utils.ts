@@ -23,7 +23,7 @@ export interface TestEnvironment {
 export function setupTestEnvironment(options: {
   mockCommands?: boolean;
   mockTerminal?: boolean;
-  gitRepoPath?: string; // Path that should be treated as a Git repo
+  gitRepoPath?: string | null; // Path that should be treated as a Git repo, or null for non-Git
 } = {}): TestEnvironment {
   const { mockCommands = true, mockTerminal = true, gitRepoPath } = options;
   const op = createMock1PasswordCLI();
@@ -254,7 +254,7 @@ async function mockOpCommand(mockOp: Mock1PasswordCLI, args: string[]) {
 /**
  * Helper function to mock Git commands
  */
-async function mockGitCommand(args: string[], cwd?: string, gitRepoPath?: string) {
+async function mockGitCommand(args: string[], cwd?: string, gitRepoPath?: string | null) {
   try {
     const command = args[0]?.toLowerCase() || '';
     const repoPath = cwd || Deno.cwd();

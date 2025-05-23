@@ -2,4 +2,4 @@
 docs/
 bin/
 # Don't index it, add it manually. If it gets out of date it will confuse the AI agent
-.ai/context/codebase-summary.xml
+.ai/context/snapshot.xml

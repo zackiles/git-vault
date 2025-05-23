@@ -13,12 +13,6 @@ const configs: RepomixConfig[] = [
     extraFlags: ['--remove-empty-lines', '--compress', '--quiet', '--parsable-style'],
   },
   {
-    remote: 'https://github.com/vercel/ai',
-    include: ['packages/ai/core/**/*.ts'],
-    output: join(Deno.cwd(), '.ai', 'context', 'ai-sdk-core.xml'),
-    extraFlags: ['--remove-empty-lines', '--compress', '--quiet', '--parsable-style'],
-  },
-  {
     config: join(Deno.cwd(), 'repomix.config.json'),
     extraFlags: ['--quiet'],
   },

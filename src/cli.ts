@@ -1,6 +1,6 @@
 import { dedent } from '@qnighy/dedent'
 import { parseArgs } from '@std/cli'
-import { bold, cyan, green, yellow } from '@std/fmt/colors'
+import { bold, cyan, yellow } from '@std/fmt/colors'
 import { join } from '@std/path/join'
 import { resolve } from '@std/path'
 import { exists } from '@std/fs'
@@ -12,8 +12,8 @@ import uninstall from './commands/uninstall.ts'
 import gracefulShutdown from './utils/graceful-shutdown.ts'
 import terminal from './utils/terminal.ts'
 import { COMMAND_DESCRIPTIONS } from './constants.ts'
-import { PATHS } from './paths.ts'
 import type { CommandName, CommandRegistry } from './types.ts'
+import * as dev from './utils/dev.ts'
 
 Deno.env.set('GV_VERSION', '0.0.5')
 
@@ -64,24 +64,28 @@ function printHelp() {
       uninstall ${COMMAND_DESCRIPTIONS.uninstall}
 
     ${bold('Global Options:')}
-      --workspace, -w  Path to the Git repository (default: current directory)
+      --workspace, -w  Path to the Git repository (default: CWD)
                        All commands operate relative to this workspace
 
     ${bold('Examples:')}
-      gv .env                            # Shorthand for: gv add .env
-      gv add .env                        # Add a single file
-      gv add config                      # Add a directory named config
-      gv remove secrets.txt              # Remove a file
-      gv list                            # List all vault files in specific workspace
+      gv .env                     # Add a file
+      gv data/                    # Add a folder
+      gv remove .env              # Remove a file (or a folder)
+      gv list                     # List items in the vault
 
-    Run "gv ${cyan('<command>')} ${yellow('--help')}" for more information on a specific command.
+    Run "gv ${cyan('<command>')} ${
+    yellow('--help')
+  }" for more information on a specific command.
   `)
 }
 
 /**
  * Check if a potential command name conflicts with an existing file or directory
  */
-async function checkCommandPathConflict(cmd: string, workspace: string): Promise<boolean> {
+async function checkCommandPathConflict(
+  cmd: string,
+  workspace: string,
+): Promise<boolean> {
   try {
     const resolvedPath = join(workspace, cmd)
     return await exists(resolvedPath)
@@ -92,37 +96,7 @@ async function checkCommandPathConflict(cmd: string, workspace: string): Promise
 
 async function main(args: string[] = Deno.args): Promise<void> {
   if (Deno.env.get('DENO_ENV') !== 'development') return runCommand(args)
-
-  const setupTempDir = async () => {
-    const tempDir = await Deno.makeTempDir({ prefix: `${PATHS.BASE_NAME}-dev-` })
-    const originalCwd = Deno.cwd()
-
-    console.log(green(`Development Mode. Temporary workspace directory: ${tempDir}`))
-    Deno.chdir(tempDir)
-
-    gracefulShutdown.addShutdownHandler(() => {
-      try {
-        console.log(`Cleaning up temporary directory: ${tempDir}`)
-        Deno.chdir(originalCwd)
-        Deno.removeSync(tempDir, { recursive: true })
-      } catch (error) {
-        terminal.error('Failed to clean up temporary directory:', error)
-      }
-    })
-
-    await new Deno.Command('git', { args: ['init'] }).output()
-    await Deno.writeTextFile(join(tempDir, 'README.md'), '')
-
-    return tempDir
-  }
-
-  const tempDir = await setupTempDir()
-  const modifiedArgs = [
-    ...args.filter((arg) => !arg.startsWith('--workspace') && !arg.startsWith('-w')),
-    '--workspace',
-    tempDir,
-  ]
-
+  const modifiedArgs = await dev.start(args)
   await runCommand(modifiedArgs)
 }
 
@@ -140,7 +114,11 @@ async function runCommand(args: string[]) {
     if (!hasConflict) return false
 
     console.log(dedent`
-      ${bold(`'${cyan(cmd)}' is both a command name and an existing file/directory.`)}
+      ${
+      bold(
+        `'${cyan(cmd)}' is both a command name and an existing file/directory.`,
+      )
+    }
       ${bold('Please specify which one you want to use:')}
     `)
 

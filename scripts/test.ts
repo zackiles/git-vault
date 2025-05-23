@@ -10,7 +10,9 @@ import { parse } from '@std/jsonc'
 
 const scriptDir = dirname(fromFileUrl(import.meta.url))
 const projectRoot = join(scriptDir, '..')
-const denoJson = parse(await Deno.readTextFile(join(projectRoot, 'deno.json'))) as {
+const denoJson = parse(
+  await Deno.readTextFile(join(projectRoot, 'deno.json')),
+) as {
   version?: string
 }
 
@@ -47,7 +49,7 @@ for (let i = 0; i < args.length; i++) {
 const testArgs = [
   'test',
   '-A',
-  '--reporter=pretty',
+  '--reporter=dot',
   '--reload',
   ...cleanedArgs,
 ]

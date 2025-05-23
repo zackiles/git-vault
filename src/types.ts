@@ -17,6 +17,10 @@ type CommandRegistry = Record<CommandName, CommandHandler>
 type ManagedPath = {
   hash: string
   path: string
+  // Track which project config files have Git-Vault tasks added
+  addedTasks?: {
+    file: string // e.g., 'package.json', 'deno.json'
+  }[]
 }
 
 type GitVaultConfig = {

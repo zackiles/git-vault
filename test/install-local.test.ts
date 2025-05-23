@@ -1,8 +1,6 @@
 import { copy, ensureDir, exists } from '@std/fs'
 import { dirname, fromFileUrl, join } from '@std/path'
 import { setupTestEnvironment } from './mocks/test-utils.ts'
-import { PATHS } from '../src/paths.ts'
-import { assert } from 'jsr:@std/assert'
 
 const isWindows = Deno.build.os === 'windows'
 
@@ -50,7 +48,9 @@ Deno.test('install.sh can use a local zip file', {
     console.log('Building git-vault binary...')
 
     // Run build script to create a zip in the temp directory
-    console.log(`Running command: deno run --allow-all ${buildScript} --bin-path ${binDir}`)
+    console.log(
+      `Running command: deno run --allow-all ${buildScript} --bin-path ${binDir}`,
+    )
     const buildProcess = new Deno.Command('deno', {
       args: [
         'run',
@@ -66,8 +66,12 @@ Deno.test('install.sh can use a local zip file', {
     const buildOutput = await buildProcess.output()
 
     console.log(`Build process exit code: ${buildOutput.code}`)
-    console.log(`Build process stdout length: ${buildOutput.stdout.length} bytes`)
-    console.log(`Build process stderr length: ${buildOutput.stderr.length} bytes`)
+    console.log(
+      `Build process stdout length: ${buildOutput.stdout.length} bytes`,
+    )
+    console.log(
+      `Build process stderr length: ${buildOutput.stderr.length} bytes`,
+    )
 
     if (!buildOutput.success) {
       const stdoutText = new TextDecoder().decode(buildOutput.stdout)
@@ -129,7 +133,9 @@ Deno.test('install.sh can use a local zip file', {
           stderr: 'null',
         }).output()
       } catch {
-        console.warn(`Could not set executable permissions for ${tempInstall} on Windows`)
+        console.warn(
+          `Could not set executable permissions for ${tempInstall} on Windows`,
+        )
       }
     }
     console.log(`Copied install.sh to ${tempInstall}`)
@@ -200,7 +206,9 @@ Deno.test('install.sh can use a local zip file', {
       // Check if binary was installed
       const expectedBinaryPath = join(testHome, '.local', 'bin', 'gv')
       const binaryInstalled = await exists(expectedBinaryPath)
-      console.log(`Binary installed to ${expectedBinaryPath}: ${binaryInstalled}`)
+      console.log(
+        `Binary installed to ${expectedBinaryPath}: ${binaryInstalled}`,
+      )
 
       // We can consider the test successful if either:
       // 1. We see the "Using local zip file" message
@@ -237,7 +245,9 @@ Deno.test('install.sh can use a local zip file', {
 
         // For debugging, let's be more lenient - if the script at least tried to run, that's progress
         if (stdoutContent.length > 0 || stderrContent.length > 0) {
-          console.log('⚠️  Script executed but may have failed due to test environment limitations')
+          console.log(
+            '⚠️  Script executed but may have failed due to test environment limitations',
+          )
           console.log('This is acceptable for a basic "script can run" test')
         } else {
           throw new Error('The install.sh script did not produce any output')

@@ -5,14 +5,19 @@
 import { assert, assertEquals } from '@std/assert'
 import { join } from '@std/path'
 import { exists } from '@std/fs'
-import { initializeVault, isVaultInitialized } from '../src/utils/initialize-vault.ts'
+import {
+  initializeVault,
+  isVaultInitialized,
+} from '../src/utils/initialize-vault.ts'
 import { setupTestEnvironment } from './mocks/test-utils.ts'
 import { getGitVaultConfigPath } from '../src/utils/config.ts'
 
 /**
  * Creates a temporary Git repository for testing
  */
-async function createTempGitRepo(): Promise<{ path: string; cleanup: () => Promise<void> }> {
+async function createTempGitRepo(): Promise<
+  { path: string; cleanup: () => Promise<void> }
+> {
   const tempDir = await Deno.makeTempDir({ prefix: 'git-vault-test-' })
 
   const gitInit = new Deno.Command('git', {
@@ -66,7 +71,9 @@ async function createTempGitRepo(): Promise<{ path: string; cleanup: () => Promi
 /**
  * Creates a temporary directory that's not a Git repository
  */
-async function createTempNonGitDir(): Promise<{ path: string; cleanup: () => Promise<void> }> {
+async function createTempNonGitDir(): Promise<
+  { path: string; cleanup: () => Promise<void> }
+> {
   const tempDir = await Deno.makeTempDir({ prefix: 'gv-test-non-git-' })
   await Deno.writeTextFile(join(tempDir, 'README.md'), '# Not a Git Repository')
 
@@ -90,7 +97,10 @@ async function createTempNonGitDir(): Promise<{ path: string; cleanup: () => Pro
  * Verifies basic initialization files and configurations
  */
 async function verifyBasicInitialization(repoPath: string) {
-  assert(await exists(join(repoPath, '.vault')), '.vault directory should exist')
+  assert(
+    await exists(join(repoPath, '.vault')),
+    '.vault directory should exist',
+  )
   assert(
     await exists(join(repoPath, '.vault', 'storage')),
     '.vault/storage directory should exist',
@@ -102,11 +112,24 @@ async function verifyBasicInitialization(repoPath: string) {
   const configJson = await Deno.readTextFile(configPath)
   const config = JSON.parse(configJson)
 
-  assert(typeof config.version === 'number', 'Config should have a version number')
+  assert(
+    typeof config.version === 'number',
+    'Config should have a version number',
+  )
   assertEquals(config.storageMode, 'file', 'Storage mode should be "file"')
-  assert(typeof config.lfsThresholdMB === 'number', 'Config should have an LFS threshold')
-  assert(Array.isArray(config.managedPaths), 'Config should have a managedPaths array')
-  assertEquals(config.managedPaths.length, 0, 'managedPaths should be empty initially')
+  assert(
+    typeof config.lfsThresholdMB === 'number',
+    'Config should have an LFS threshold',
+  )
+  assert(
+    Array.isArray(config.managedPaths),
+    'Config should have a managedPaths array',
+  )
+  assertEquals(
+    config.managedPaths.length,
+    0,
+    'managedPaths should be empty initially',
+  )
 }
 
 /**
@@ -119,12 +142,19 @@ async function verifyLfsConfiguration(repoPath: string) {
   const configJson = await Deno.readTextFile(configPath)
   const config = JSON.parse(configJson)
 
-  assert(typeof config.lfsThresholdMB === 'number', 'Config should have an LFS threshold')
+  assert(
+    typeof config.lfsThresholdMB === 'number',
+    'Config should have an LFS threshold',
+  )
   assert(config.lfsThresholdMB > 0, 'LFS threshold should be positive')
 
-  const gitattributes = await Deno.readTextFile(join(repoPath, '.gitattributes'))
+  const gitattributes = await Deno.readTextFile(
+    join(repoPath, '.gitattributes'),
+  )
   assert(
-    gitattributes.includes('.vault/storage/*.tar.gz.gpg filter=lfs diff=lfs merge=lfs'),
+    gitattributes.includes(
+      '.vault/storage/*.tar.gz.gpg filter=lfs diff=lfs merge=lfs',
+    ),
     'Git LFS attributes should be configured',
   )
 }
@@ -141,10 +171,16 @@ async function verifyHooksInstallation(hooksPath: string) {
     assert(await exists(hookPath), `${hook} hook should exist`)
 
     const stat = await Deno.stat(hookPath)
-    assert(stat.mode !== null && (stat.mode & 0o111) !== 0, `${hook} hook should be executable`)
+    assert(
+      stat.mode !== null && (stat.mode & 0o111) !== 0,
+      `${hook} hook should be executable`,
+    )
 
     const content = await Deno.readTextFile(hookPath)
-    assert(content.includes('git-vault'), `${hook} hook should contain git-vault reference`)
+    assert(
+      content.includes('git-vault'),
+      `${hook} hook should contain git-vault reference`,
+    )
   }
 }
 
@@ -170,7 +206,7 @@ Deno.test({
   async fn() {
     const { path, cleanup } = await createTempNonGitDir()
     // Explicitly indicate this is not a Git repo by passing null
-    const testEnv = setupTestEnvironment({ gitRepoPath: null as any })
+    const testEnv = setupTestEnvironment({ gitRepoPath: null })
 
     try {
       const initialized = await initializeVault(path, true)

@@ -21,6 +21,11 @@ import { readGitVaultConfig, writeGitVaultConfig } from '../utils/config.ts'
 import { DEFAULT_1PASSWORD_VAULT } from '../constants.ts'
 import { initializeVault, isVaultInitialized } from '../utils/initialize-vault.ts'
 import { PATHS } from '../paths.ts'
+import {
+  addTasksToProjectConfig,
+  detectProjectConfigFile,
+  getTaskDefinitions,
+} from '../utils/project-config.ts'
 
 /**
  * Adds a file or directory to gv by encrypting it and storing it in the repository
@@ -299,6 +304,61 @@ async function run(args: CommandArgs): Promise<void> {
           'Git LFS enabled:',
           `archive size ${archiveSize.toFixed(2)}MB (threshold: ${config.lfsThresholdMB}MB)`,
         )
+      }
+
+      // Check for project config files and offer to add Git-Vault tasks
+      const projectConfigFile = await detectProjectConfigFile(repoRoot)
+      if (projectConfigFile) {
+        const shouldAddTasks = terminal.createConfirm(
+          `Would you like to add Git-Vault tasks to ${projectConfigFile}?`,
+          true,
+        )
+
+        if (shouldAddTasks) {
+          const tasks = getTaskDefinitions(projectConfigFile)
+          const success = await addTasksToProjectConfig(repoRoot, projectConfigFile, tasks)
+
+          if (success) {
+            // Update the managed path entry to track which config file was modified
+            const pathEntry = config.managedPaths.find((p) => p.hash === pathHash)
+            if (pathEntry) {
+              if (!pathEntry.addedTasks) {
+                pathEntry.addedTasks = []
+              }
+              pathEntry.addedTasks.push({ file: projectConfigFile })
+            }
+
+            await writeGitVaultConfig(repoRoot, config)
+            await stageFile(projectConfigFile)
+
+            terminal.info(`Added Git-Vault tasks to ${projectConfigFile}`, '')
+
+            // Provide usage instructions based on the config file type
+            switch (projectConfigFile) {
+              case 'package.json':
+                terminal.info(
+                  'Usage: npm run vault:add <path> | npm run vault:remove <path> | npm run vault:list',
+                  '',
+                )
+                break
+              case 'deno.json':
+              case 'deno.jsonc':
+                terminal.info(
+                  'Usage: deno task vault:add <path> | deno task vault:remove <path> | deno task vault:list',
+                  '',
+                )
+                break
+              case 'Makefile':
+                terminal.info(
+                  'Usage: make vault-add <path> | make vault-remove <path> | make vault-list',
+                  '',
+                )
+                break
+            }
+          } else {
+            terminal.warn(`Failed to add tasks to ${projectConfigFile}`)
+          }
+        }
       }
     } finally {
       await Deno.remove(tempDir, { recursive: true })

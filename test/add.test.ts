@@ -526,7 +526,7 @@ Deno.test({
 Deno.test({
   name: 'add: with 1Password storage integration',
   async fn() {
-    const testEnv = setupTestEnvironment()
+    const testEnv = setupTestEnvironment({ mockTerminal: false, mockCommands: false })
     const { path: repoPath, cleanup } = await createTempGitRepo()
 
     try {
@@ -614,6 +614,9 @@ Deno.test({
         return options[0] || ''
       }
 
+      const originalCreatePromptPassword = terminal.createPromptPassword
+      terminal.createPromptPassword = () => 'test-password-123'
+
       // Initialize vault with 1Password support (autoConfirm = false to trigger prompts)
       await initializeVault(repoPath, false)
 
@@ -646,7 +649,7 @@ Deno.test({
 
       const mockItem = mockCreatedItems.get(expectedItemName)
       assert(mockItem, 'Mock item should exist')
-      assertEquals(mockItem.password, 'test-password', 'Should store correct password')
+      assertEquals(mockItem.password, 'test-password-123', 'Should store correct password')
       assertEquals(mockItem.fields.path, actualPath, 'Should store correct path field')
       assertEquals(mockItem.fields.status, 'active', 'Should store correct status field')
 
@@ -671,6 +674,7 @@ Deno.test({
       globalThis.Deno.Command = originalCommand
       terminal.createConfirm = originalCreateConfirm
       terminal.createPromptSelect = originalCreatePromptSelect
+      terminal.createPromptPassword = originalCreatePromptPassword
     } finally {
       testEnv.restore()
       await cleanup()

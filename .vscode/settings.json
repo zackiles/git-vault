@@ -63,6 +63,8 @@
     "certutil",
     "hashfile",
     "doesnt",
-    "LOCALAPPDATA'"
+    "LOCALAPPDATA",
+    "Repomix",
+    "MAKECMDGOALS"
   ],
 }

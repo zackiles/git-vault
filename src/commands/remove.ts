@@ -11,6 +11,8 @@ import { dedent } from '@qnighy/dedent'
 import { readGitVaultConfig, writeGitVaultConfig } from '../utils/config.ts'
 import { DEFAULT_1PASSWORD_VAULT } from '../constants.ts'
 import { PATHS } from '../paths.ts'
+import { removeTasksFromProjectConfig } from '../utils/project-config.ts'
+import type { ProjectConfigFile } from '../utils/project-config.ts'
 
 /**
  * Remove command implementation
@@ -160,6 +162,9 @@ async function run(args: CommandArgs): Promise<void> {
     // Password verified, proceed with removal
     terminal.section('Removing from gv management...')
 
+    // Store the current pathEntry for project config cleanup
+    const removingPathEntry = pathEntry
+
     // 1. Remove from config
     terminal.status('Updating configuration')
     config.managedPaths = config.managedPaths.filter((p) => p.hash !== pathHash)
@@ -247,6 +252,30 @@ async function run(args: CommandArgs): Promise<void> {
         }
 
         await stageFile('.gitignore')
+      }
+    }
+
+    // 5. Handle project config cleanup
+    if (removingPathEntry?.addedTasks) {
+      for (const addedTask of removingPathEntry.addedTasks) {
+        const shouldRemoveTasks = terminal.createConfirm(
+          `Remove Git-Vault tasks from ${addedTask.file}?`,
+          true,
+        )
+
+        if (shouldRemoveTasks) {
+          const success = await removeTasksFromProjectConfig(
+            repoRoot,
+            addedTask.file as ProjectConfigFile,
+          )
+
+          if (success) {
+            await stageFile(addedTask.file)
+            terminal.info(`Removed Git-Vault tasks from ${addedTask.file}`, '')
+          } else {
+            terminal.warn(`Failed to remove tasks from ${addedTask.file}`)
+          }
+        }
       }
     }
 

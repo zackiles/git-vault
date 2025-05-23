@@ -75,6 +75,14 @@ Sorted by **observed popularity in GitHub OSS projects**, focused on repositorie
 - Add tests that verify the workflow templates work in CI environment
 - Consider adding a command like `gv workflow install` that helps users set up the CI integration
 
+### 8. Add/Remove globs
+
+Add and remove command should accept glob patterns. config.json should handle mappings from archive back to paths.
+
+### 9. Rename config.json to vault.json
+
+More intentional, less chance to get caught in a gitignore
+
 ## Completed TODOs
 
 Once TODOs are fully implemented, tested, and documented, move them here for future reference. TODOs in this section no longer need to be implemented and are kept for historical reasons.

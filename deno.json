@@ -36,7 +36,8 @@
     "@std/testing": "jsr:@std/testing@1",
     "@std/text": "jsr:@std/text@^1.0.13",
     "@valibot/valibot": "jsr:@valibot/valibot@^1.1.0",
-    "@zip-js/zip-js": "jsr:@zip-js/zip-js@^2.7.62"
+    "@zip-js/zip-js": "jsr:@zip-js/zip-js@^2.7.62",
+    "jsonc-parser": "npm:jsonc-parser@^3.3.1"
   },
   "lint": {
     "include": [
@@ -51,7 +52,7 @@
     ]
   },
   "fmt": {
-    "lineWidth": 100,
+    "lineWidth": 80,
     "useTabs": false,
     "indentWidth": 2,
     "singleQuote": true,
