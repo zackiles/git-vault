@@ -46,8 +46,8 @@ curl -fsSL https://raw.githubusercontent.com/zackiles/git-vault/main/install.sh 
 **Homebrew (macOS/Linux):**
 
 ```bash
-brew tap zackiles/homebrew-git-vault
-brew install gv
+brew tap zackiles/git-vault
+brew install git-vault
 ```
 
 **Chocolatey (Windows):**
