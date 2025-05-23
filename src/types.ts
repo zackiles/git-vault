@@ -1,37 +1,18 @@
-import type { ParseOptions } from '@std/cli'
+// A single type containing all command names
+type CommandName = 'add' | 'remove' | 'list' | 'version' | 'uninstall'
 
-const COMMANDS = ['add', 'remove', 'list', 'version', 'uninstall'] as const
-type CommandName = typeof COMMANDS[number]
-
-type CLIOptions = ParseOptions & {
-  workspace?: string
+// Command arguments with workspace always defined
+type CommandArgs = {
+  workspace: string
+  item?: string
+  [key: string]: unknown
 }
 
-type BaseCommandArgs = {
-  _: string[]
-  workspace?: string
-} & Record<string, unknown>
+// Command functions that take args and return void
+type CommandHandler = (args: CommandArgs) => Promise<void> | void
 
-// Command handler type is directly a function type
-type CommandHandler = (args: BaseCommandArgs) => Promise<void> | void
-
-// Command registry type derived from command names
+// Command registry
 type CommandRegistry = Record<CommandName, CommandHandler>
-
-// Command definition derived from existing values
-type Command = {
-  name: CommandName
-  description: string
-  aliases?: string[]
-  handler: CommandHandler
-  args?: Array<{
-    name: string
-    description: string
-    required?: boolean
-    positional?: boolean
-    default?: unknown
-  }>
-}
 
 type ManagedPath = {
   hash: string
@@ -47,9 +28,7 @@ type GitVaultConfig = {
 }
 
 export type {
-  BaseCommandArgs,
-  CLIOptions,
-  Command,
+  CommandArgs,
   CommandHandler,
   CommandName,
   CommandRegistry,

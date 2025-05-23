@@ -2,25 +2,24 @@ import { dirname, join, relative, resolve } from '@std/path'
 import { exists } from '@std/fs'
 import { bold, cyan, yellow } from '@std/fmt/colors'
 import terminal from '../utils/terminal.ts'
-import type { BaseCommandArgs, CommandHandler } from '../types.ts'
+import type { CommandArgs, CommandHandler } from '../types.ts'
 import { generateHash } from '../utils/crypto.ts'
-import { getProjectName, getRepositoryRoot, stageFile } from '../services/git.ts'
+import { getProjectName, getRepositoryRoot, stageFile, updateGitignore } from '../services/git.ts'
 import { verifyPassword } from '../services/gpg.ts'
 import { getPassword, isOpAvailable, isSignedIn, markItemRemoved } from '../services/op.ts'
 import { dedent } from '@qnighy/dedent'
 import { readGitVaultConfig, writeGitVaultConfig } from '../utils/config.ts'
 import { DEFAULT_1PASSWORD_VAULT } from '../constants.ts'
+import { PATHS } from '../paths.ts'
 
 /**
  * Remove command implementation
  *
  * Removes a file or directory from gv management
  */
-async function run(args: BaseCommandArgs): Promise<void> {
-  const paths = args._
-
-  if (paths.length === 0) {
-    terminal.error(bold('No path specified'))
+async function run(args: CommandArgs): Promise<void> {
+  if (!args.item) {
+    terminal.error('No path to a vaulted item to remove specified')
     console.log(dedent`${bold('Usage:')} ${cyan('gv remove')} ${yellow('<path>')}`)
     return
   }
@@ -47,7 +46,7 @@ async function run(args: BaseCommandArgs): Promise<void> {
     }
 
     // Get the resolved path and relative path
-    const resolvedPath = resolve(paths[0])
+    const resolvedPath = resolve(args.item)
     let relativePath = relative(repoRoot, resolvedPath)
 
     // Generate hash for the path without trailing slash first
@@ -71,12 +70,12 @@ async function run(args: BaseCommandArgs): Promise<void> {
 
     // Check if path is managed
     if (!pathEntry) {
-      terminal.error(`Path not managed by gv: ${paths[0]} (hash ${pathHash})`)
+      terminal.error(`Path not managed by gv: ${args.item} (hash ${pathHash})`)
       return
     }
 
     // Determine file paths
-    const passwordFile = join(gitVaultDir, `gv-${pathHash}.pw`)
+    const passwordFile = join(gitVaultDir, `${PATHS.BASE_NAME}-${pathHash}.pw`)
     const passwordFile1p = `${passwordFile}.1p`
     const archiveName = relativePath.replaceAll('/', '-')
     const archivePath = join(storageDir, `${archiveName}.tar.gz.gpg`)
@@ -93,10 +92,10 @@ async function run(args: BaseCommandArgs): Promise<void> {
       return
     }
 
+    terminal.section(`Verifying password for: ${relativePath}`)
+
     // Verify password
     if (use1Password) {
-      console.log(`${bold('Verifying password:')} via 1Password for '${cyan(relativePath)}'...`)
-
       // Check 1Password connection
       if (!await isOpAvailable() || !await isSignedIn()) {
         terminal.error('1Password CLI issues detected. Aborting removal.')
@@ -108,7 +107,7 @@ async function run(args: BaseCommandArgs): Promise<void> {
 
       // Get project name for item naming
       const projectName = await getProjectName(repoRoot)
-      const itemName = `gv-${projectName}-${pathHash}`
+      const itemName = `${PATHS.BASE_NAME}-${projectName}-${pathHash}`
 
       // Get password from 1Password
       const password = await getPassword(itemName, vaultName)
@@ -137,7 +136,6 @@ async function run(args: BaseCommandArgs): Promise<void> {
       }
     } else {
       // For file storage, verify using the password file
-      console.log(`${bold('Verifying password:')} via local file for '${cyan(relativePath)}'...`)
       const password = await Deno.readTextFile(passwordFile)
 
       if (!await exists(archivePath)) {
@@ -156,50 +154,49 @@ async function run(args: BaseCommandArgs): Promise<void> {
       }
     }
 
+    terminal.success('Password verified successfully')
+    console.log('')
+
     // Password verified, proceed with removal
-    console.log(bold('\nProceeding with removal...'))
+    terminal.section('Removing from gv management...')
 
     // 1. Remove from config
-    console.log(`${bold('Step 1:')} Removing entry from config '${cyan('.vault/config.json')}'...`)
+    terminal.status('Updating configuration')
     config.managedPaths = config.managedPaths.filter((p) => p.hash !== pathHash)
     await writeGitVaultConfig(repoRoot, config)
 
     // 2. Handle password file or 1Password entry
     if (use1Password) {
-      console.log(`${bold('Step 2:')} Marking 1Password item as removed...`)
+      terminal.status('Marking 1Password item as removed')
 
       // Get 1Password vault name from config
       const vaultName = config.onePasswordVault || DEFAULT_1PASSWORD_VAULT
 
       // Get project name for item naming
       const projectName = await getProjectName(repoRoot)
-      const itemName = `gv-${projectName}-${pathHash}`
+      const itemName = `${PATHS.BASE_NAME}-${projectName}-${pathHash}`
 
       // Mark as removed in 1Password
       const marked = await markItemRemoved(itemName, vaultName)
 
       if (!marked) {
-        console.log(
-          'Error: Failed to mark 1Password item as removed. Continuing with local cleanup.',
-        )
+        terminal.warn('Failed to mark 1Password item as removed. Continuing with local cleanup.')
       }
 
       // Remove marker file
-      console.log(`${bold('Step 3:')} Removing 1Password marker file '${cyan(passwordFile1p)}'...`)
       await Deno.remove(passwordFile1p)
     } else {
       // For file storage, rename password file
-      const removedPasswordFile = join(dirname(passwordFile), `gv-${pathHash}.removed`)
-      console.log(`${bold('Step 2:')} Renaming password file to '${cyan(removedPasswordFile)}'...`)
+      const removedPasswordFile = join(
+        dirname(passwordFile),
+        `${PATHS.BASE_NAME}-${pathHash}.removed`,
+      )
+      terminal.status('Preserving password file')
       await Deno.rename(passwordFile, removedPasswordFile)
     }
 
     // 3. Remove archive file
-    console.log(
-      `${bold('Step 3:')} Removing archive file '${
-        cyan(archivePath)
-      }' from Git index and filesystem...`,
-    )
+    terminal.status('Removing encrypted archive')
 
     // Ignore errors if this fails
     await stageFile(`--rm --cached --ignore-unmatch ${relative(repoRoot, archivePath)}`).catch()
@@ -208,95 +205,81 @@ async function run(args: BaseCommandArgs): Promise<void> {
       await Deno.remove(archivePath)
     }
 
-    console.log(' - Checking .gitignore for ignore rule...')
+    // 4. Handle .gitignore cleanup
+    terminal.status('Checking .gitignore cleanup')
     const gitignorePath = join(repoRoot, '.gitignore')
-
     const ignorePattern = `/${relativePath}`
 
+    // Check if the pattern exists in the .gitignore
+    let patternExists = false
     if (await exists(gitignorePath)) {
       const gitignoreContent = await Deno.readTextFile(gitignorePath)
       const gitignoreLines = gitignoreContent.split('\n')
+      patternExists = gitignoreLines.includes(ignorePattern)
+    }
 
-      if (gitignoreLines.includes(ignorePattern)) {
-        const confirmed = terminal.confirm(
-          `Remove '${ignorePattern}' from .gitignore?`,
-          false,
-        )
+    if (patternExists) {
+      const confirmed = terminal.createConfirm(
+        `Remove '${ignorePattern}' from .gitignore?`,
+        false,
+      )
 
-        if (confirmed) {
-          console.log(`   Removing '${ignorePattern}' from .gitignore...`)
+      if (confirmed) {
+        // Patterns to remove
+        const patternsToRemove = [ignorePattern]
 
-          const newGitignore = gitignoreLines.filter((line) => line !== ignorePattern).join('\n')
-          await Deno.writeTextFile(gitignorePath, newGitignore)
+        // If there are no more managed paths, also remove the password patterns
+        if (config.managedPaths.length === 0) {
+          terminal.status('Removing generic password ignore patterns')
 
-          if (config.managedPaths.length === 0) {
-            console.log('   No more managed paths. Removing generic password ignore patterns...')
+          const pwIgnorePattern = `${relative(repoRoot, gitVaultDir)}/*.pw`
+          const pw1pIgnorePattern = `${relative(repoRoot, gitVaultDir)}/*.pw.1p`
 
-            const pwIgnorePattern = `${relative(repoRoot, gitVaultDir)}/*.pw`
-            const pwCommentLine = '# GV password files (DO NOT COMMIT)'
-            const pw1pIgnorePattern = `${relative(repoRoot, gitVaultDir)}/*.pw.1p`
-            const pw1pCommentLine = '# GV 1Password marker files (DO NOT COMMIT)'
+          patternsToRemove.push(pwIgnorePattern, pw1pIgnorePattern)
 
-            const finalGitignore = (await Deno.readTextFile(gitignorePath))
-              .split('\n')
-              .filter((line) =>
-                line !== pwCommentLine &&
-                line !== pwIgnorePattern &&
-                line !== pw1pCommentLine &&
-                line !== pw1pIgnorePattern
-              )
-              .join('\n')
-
-            await Deno.writeTextFile(gitignorePath, finalGitignore)
-          }
-
-          console.log('   Staging updated .gitignore...')
-          await stageFile('.gitignore')
+          await updateGitignore(repoRoot, patternsToRemove, {
+            mode: 'remove',
+            removeCommentsMatching: ['GV password files', 'GV 1Password marker files'],
+          })
         } else {
-          console.log(`   Keeping '${ignorePattern}' in .gitignore.`)
+          // Just remove the specific pattern
+          await updateGitignore(repoRoot, patternsToRemove, { mode: 'remove' })
         }
-      } else {
-        console.log(`   Ignore pattern '${ignorePattern}' not found in .gitignore.`)
+
+        await stageFile('.gitignore')
       }
     }
 
     // Show success message
     console.log('')
-    terminal.success(bold('File successfully unmanaged from gv'))
-    console.log(`${bold('Path:')} ${cyan(relativePath)}`)
-    console.log(`${bold('Changes made:')}`)
-    console.log(` - Config entry removed from ${cyan('.vault/config.json')}`)
+    terminal.success(`File unmanaged from gv: ${relativePath}`)
+
+    terminal.section('Changes made:')
+    terminal.status('Config entry removed from .vault/config.json', '•')
+    terminal.status(`Archive ${archivePath} removed`, '•')
 
     if (use1Password) {
-      console.log(' - 1Password item marked as removed')
-      console.log(` - 1Password marker file ${cyan(passwordFile1p)} removed`)
+      terminal.status('1Password item marked as removed', '•')
+      terminal.status('1Password marker file removed', '•')
     } else {
-      const removedPasswordFile = join(dirname(passwordFile), `gv-${pathHash}.removed`)
-      console.log(` - Password file renamed to ${cyan(removedPasswordFile)}`)
+      const removedPasswordFile = join(
+        dirname(passwordFile),
+        `${PATHS.BASE_NAME}-${pathHash}.removed`,
+      )
+      terminal.status(`Password file preserved as ${removedPasswordFile}`, '•')
     }
 
-    console.log(` - Archive ${cyan(archivePath)} removed`)
+    terminal.section('Next steps:')
+    terminal.status('Please commit the changes made to:', '•')
+    terminal.status('.vault/config.json', ' ')
+    terminal.status('.gitignore (if modified)', ' ')
+    terminal.status('Any removal of tracked archives', ' ')
 
-    console.log(dedent`\n${bold('Next steps:')}`)
-    console.log('Please commit the changes made to:')
-    console.log(` - ${cyan('.vault/config.json')}`)
-    console.log(' - .gitignore (if modified)')
-    console.log(` - Any removal of ${cyan(archivePath)} tracked by Git`)
-
-    console.log(dedent`\n${bold('Note:')}`)
-    console.log(
-      `The original plaintext path '${cyan(relativePath)}' remains in your working directory.`,
-    )
+    terminal.section('Note:')
+    terminal.status(`The original path '${relativePath}' remains in your working directory.`)
 
     if (use1Password) {
-      console.log(
-        `The password item in 1Password was marked as ${yellow('removed')} but not deleted.`,
-      )
-    } else {
-      const removedPasswordFile = join(dirname(passwordFile), `gv-${pathHash}.removed`)
-      console.log(
-        `The password file was renamed to '${cyan(removedPasswordFile)}' for potential recovery.`,
-      )
+      terminal.warn('The password item in 1Password was marked as removed but not deleted.')
     }
   } catch (error) {
     terminal.error('Failed to remove file', error)

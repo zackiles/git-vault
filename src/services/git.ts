@@ -5,6 +5,7 @@
  */
 
 import * as path from '@std/path'
+import terminal from '../utils/terminal.ts'
 
 /**
  * Checks if a path is inside a Git repository
@@ -146,11 +147,20 @@ async function isTracked(filePath: string): Promise<boolean> {
  * Updates the .gitignore file with patterns
  *
  * @param repoRoot The repository root path
- * @param patterns Array of patterns to add
+ * @param patterns Array of patterns to add or remove
+ * @param options Configuration options for the update
  * @returns Promise that resolves to true if successful
  */
-async function updateGitignore(repoRoot: string, patterns: string[]): Promise<boolean> {
+async function updateGitignore(
+  repoRoot: string,
+  patterns: string[],
+  options: {
+    mode?: 'add' | 'remove' | 'set'
+    removeCommentsMatching?: string[]
+  } = { mode: 'add' },
+): Promise<boolean> {
   try {
+    const { mode = 'add', removeCommentsMatching = [] } = options
     const gitignorePath = path.join(repoRoot, '.gitignore')
 
     // Read existing content or create empty file
@@ -159,17 +169,43 @@ async function updateGitignore(repoRoot: string, patterns: string[]): Promise<bo
       content = await Deno.readTextFile(gitignorePath)
     } catch {
       // File doesn't exist, will be created
+      if (mode === 'remove') {
+        // Nothing to remove from an empty file
+        return true
+      }
     }
 
-    const lines = content.split('\n')
+    let lines = content.split('\n').map((line) => line.trim()).filter(Boolean)
     let modified = false
 
-    // Add patterns that don't already exist
-    for (const pattern of patterns) {
-      if (!lines.includes(pattern)) {
-        lines.push(pattern)
-        modified = true
+    if (mode === 'add') {
+      // Add patterns that don't already exist
+      for (const pattern of patterns) {
+        if (!lines.includes(pattern)) {
+          lines.push(pattern)
+          modified = true
+        }
       }
+    } else if (mode === 'remove') {
+      // Remove patterns that exist
+      const initialLength = lines.length
+      lines = lines.filter((line) => !patterns.includes(line))
+
+      // Also remove any matching comment lines if specified
+      if (removeCommentsMatching.length > 0) {
+        lines = lines.filter((line) => {
+          if (line.startsWith('#')) {
+            return !removeCommentsMatching.some((comment) => line.includes(comment))
+          }
+          return true
+        })
+      }
+
+      modified = lines.length !== initialLength
+    } else if (mode === 'set') {
+      // Replace the entire file with the provided patterns
+      modified = true
+      lines = [...patterns]
     }
 
     // Only write file if changes were made
@@ -179,9 +215,7 @@ async function updateGitignore(repoRoot: string, patterns: string[]): Promise<bo
 
     return true
   } catch (error) {
-    console.error(
-      `Error updating .gitignore: ${error instanceof Error ? error.message : String(error)}`,
-    )
+    terminal.error('Error updating .gitignore', error)
     return false
   }
 }

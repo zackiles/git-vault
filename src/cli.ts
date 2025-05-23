@@ -2,6 +2,7 @@ import { dedent } from '@qnighy/dedent'
 import { parseArgs } from '@std/cli'
 import { bold, cyan, green, yellow } from '@std/fmt/colors'
 import { join } from '@std/path/join'
+import { resolve } from '@std/path'
 import { exists } from '@std/fs'
 import add from './commands/add.ts'
 import remove from './commands/remove.ts'
@@ -11,7 +12,8 @@ import uninstall from './commands/uninstall.ts'
 import gracefulShutdown from './utils/graceful-shutdown.ts'
 import terminal from './utils/terminal.ts'
 import { COMMAND_DESCRIPTIONS } from './constants.ts'
-import type { BaseCommandArgs, CLIOptions, CommandName, CommandRegistry } from './types.ts'
+import { PATHS } from './paths.ts'
+import type { CommandName, CommandRegistry } from './types.ts'
 
 Deno.env.set('GV_VERSION', '0.0.5')
 
@@ -20,7 +22,7 @@ if (!Deno.env.get('DENO_ENV')) {
   Deno.env.set('DENO_ENV', 'production')
 }
 
-const options: CLIOptions = {
+const options = {
   alias: {
     a: 'add',
     r: 'remove',
@@ -35,7 +37,7 @@ const options: CLIOptions = {
   string: ['workspace'],
   boolean: ['help', 'version'],
   default: {
-    workspace: '.',
+    workspace: Deno.cwd(),
   },
   stopEarly: false,
 }
@@ -89,115 +91,86 @@ async function checkCommandPathConflict(cmd: string, workspace: string): Promise
 }
 
 async function main(args: string[] = Deno.args): Promise<void> {
-  let tempDir: string | undefined
-  let originalCwd: string | undefined
+  if (Deno.env.get('DENO_ENV') !== 'development') return runCommand(args)
 
-  // Development mode setup
-  if (Deno.env.get('DENO_ENV') === 'development') {
-    // Create a temporary directory
-    tempDir = await Deno.makeTempDir({ prefix: 'gv-dev-' })
+  const setupTempDir = async () => {
+    const tempDir = await Deno.makeTempDir({ prefix: `${PATHS.BASE_NAME}-dev-` })
+    const originalCwd = Deno.cwd()
+
     console.log(green(`Development Mode. Temporary workspace directory: ${tempDir}`))
-
-    // Change to the temporary directory
-    originalCwd = Deno.cwd()
     Deno.chdir(tempDir)
 
-    // Add shutdown handler to clean up temporary directory
     gracefulShutdown.addShutdownHandler(() => {
-      if (tempDir) {
-        try {
-          console.log(`Cleaning up temporary directory: ${tempDir}`)
-          if (originalCwd) Deno.chdir(originalCwd)
-          Deno.removeSync(tempDir, { recursive: true })
-        } catch (error) {
-          terminal.error('Failed to clean up temporary directory:', error)
-        }
+      try {
+        console.log(`Cleaning up temporary directory: ${tempDir}`)
+        Deno.chdir(originalCwd)
+        Deno.removeSync(tempDir, { recursive: true })
+      } catch (error) {
+        terminal.error('Failed to clean up temporary directory:', error)
       }
     })
 
-    // Initialize git repository
-    const gitInitProcess = new Deno.Command('git', { args: ['init'] })
-    await gitInitProcess.output()
-
-    // Create blank README.md
+    await new Deno.Command('git', { args: ['init'] }).output()
     await Deno.writeTextFile(join(tempDir, 'README.md'), '')
+
+    return tempDir
   }
 
-  // Run the command
-  await runCommand(args)
+  const tempDir = await setupTempDir()
+  const modifiedArgs = [
+    ...args.filter((arg) => !arg.startsWith('--workspace') && !arg.startsWith('-w')),
+    '--workspace',
+    tempDir,
+  ]
 
-  // Restore original directory in development mode when not using graceful shutdown
-  if (Deno.env.get('DENO_ENV') === 'development' && originalCwd) {
-    Deno.chdir(originalCwd)
-  }
+  await runCommand(modifiedArgs)
 }
 
 async function runCommand(args: string[]) {
   const parsed = parseArgs(args, options)
+  const workspace = resolve(parsed.workspace as string)
   const [command, ...rest] = parsed._.map(String)
 
-  // Help/version flags (global)
-  if (parsed.help || command === 'help') {
-    printHelp()
-    return
-  }
-  if (parsed.version) {
-    await handlers.version({ _: [] })
-    return
-  }
+  if (parsed.help || command === 'help') return printHelp()
+  if (parsed.version) return handlers.version({ workspace })
+  if (!command) return printHelp()
 
-  // If no command, print help
-  if (!command) {
-    printHelp()
-    return
-  }
+  const handleConflict = async (cmd: string) => {
+    const hasConflict = await checkCommandPathConflict(cmd, workspace)
+    if (!hasConflict) return false
 
-  // Check for potential path/command conflicts
-  if (command in handlers) {
-    const hasConflict = await checkCommandPathConflict(command, parsed.workspace as string)
-    if (hasConflict) {
-      console.log(dedent`
-        ${bold(`'${cyan(command)}' is both a command name and an existing file/directory.`)}
-        ${bold('Please specify which one you want to use:')}
-      `)
+    console.log(dedent`
+      ${bold(`'${cyan(cmd)}' is both a command name and an existing file/directory.`)}
+      ${bold('Please specify which one you want to use:')}
+    `)
 
-      const displayOptions = [
-        `Run the '${cyan(command)}' command`,
-        `Add '${cyan(command)}' to gv`,
-      ]
+    const choice = terminal.createPromptSelect(
+      'What would you like to do?',
+      [`Run the '${cyan(cmd)}' command`, `Add '${cyan(cmd)}' to gv`],
+    )
 
-      const choice = terminal.promptSelect(
-        'What would you like to do?',
-        displayOptions,
-      )
-
-      if (choice.includes(`Add '${command}' to gv`)) {
-        // Treat as a path instead of a command
-        rest.unshift(command)
-        await handlers.add({ ...parsed, _: rest })
-        return
-      }
-      // Otherwise continue with command execution
-    }
+    return choice.includes(`Add '${cmd}' to gv`)
   }
 
-  // If the command is not recognized, default to 'add' if it's a path
   let cmd = command as CommandName
-  if (!(cmd in handlers) && cmd && !cmd.startsWith('-')) {
-    // If the first argument is a path, use the add command by default
+
+  if (cmd in handlers) {
+    const shouldAddFile = await handleConflict(cmd)
+    if (shouldAddFile) {
+      rest.unshift(cmd)
+      return handlers.add({ workspace, item: rest[0] })
+    }
+  } else if (cmd && !cmd.startsWith('-')) {
     rest.unshift(cmd)
     cmd = 'add'
   }
 
   if (!(cmd in handlers)) {
     console.error(dedent`${bold(`Unknown command: ${cyan(command)}`)}`)
-    printHelp()
-    return
+    return printHelp()
   }
 
-  // Prepare arguments for the handler
-  const handlerArgs: BaseCommandArgs = { ...parsed, _: rest }
-  await handlers[cmd](handlerArgs)
+  await handlers[cmd]({ workspace, item: rest[0] })
 }
 
 if (import.meta.main) {

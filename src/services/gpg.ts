@@ -143,7 +143,10 @@ async function verifyPassword(
       return false
     }
 
-    // Try to decrypt the file to /dev/null
+    // Use platform-appropriate null device or temp file
+    const nullDevice = Deno.build.os === 'windows' ? 'NUL' : '/dev/null'
+
+    // Try to decrypt the file to null device
     const command = new Deno.Command('gpg', {
       args: [
         '--batch',
@@ -152,7 +155,7 @@ async function verifyPassword(
         password,
         '-d',
         '--output',
-        '/dev/null',
+        nullDevice,
         encryptedFilePath,
       ],
       stdout: 'null',

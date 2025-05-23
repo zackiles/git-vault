@@ -1,4 +1,4 @@
-import { isAbsolute, join, resolve } from '@std/path'
+import { isAbsolute, join } from '@std/path'
 import { ensureDir, exists } from '@std/fs'
 import { bold, cyan } from '@std/fmt/colors'
 import { dedent } from '@qnighy/dedent'
@@ -13,7 +13,7 @@ import {
 import { isGpgAvailable } from '../services/gpg.ts'
 import { getVaults, isOpAvailable, isSignedIn } from '../services/op.ts'
 import terminal from './terminal.ts'
-import { createDefaultConfig, writeGitVaultConfig } from './config.ts'
+import { createDefaultConfig, getGitVaultConfigPath, writeGitVaultConfig } from './config.ts'
 import { DEFAULT_1PASSWORD_VAULT } from '../constants.ts'
 
 /**
@@ -84,7 +84,7 @@ async function installHooks(repoRoot: string, gitVaultDir: string): Promise<bool
  * Checks if a vault is already initialized in the given repository
  */
 export async function isVaultInitialized(repoRoot: string): Promise<boolean> {
-  return await exists(join(repoRoot, '.vault', 'config.json'))
+  return await exists(getGitVaultConfigPath(repoRoot))
 }
 
 /**
@@ -94,11 +94,13 @@ export async function initializeVault(
   workspacePath: string,
   autoConfirm = false,
 ): Promise<boolean> {
-  try {
-    const resolvedPath = resolve(workspacePath)
+  let directoryCreated = false
+  const gitVaultDir = join(workspacePath, '.vault')
+  const cleanupGitVaultDir = () => Deno.remove(gitVaultDir, { recursive: true }).catch(() => {})
 
+  try {
     try {
-      const stat = await Deno.stat(resolvedPath)
+      const stat = await Deno.stat(workspacePath)
       if (!stat.isDirectory) {
         terminal.error(`'${workspacePath}' is not a directory`)
         return false
@@ -108,7 +110,7 @@ export async function initializeVault(
       return false
     }
 
-    if (!(await isGitRepository(resolvedPath))) {
+    if (!(await isGitRepository(workspacePath))) {
       terminal.error(`'${workspacePath}' is not a Git repository`)
       return false
     }
@@ -121,12 +123,11 @@ export async function initializeVault(
       return false
     }
 
-    const gitVaultDir = join(resolvedPath, '.vault')
     const storageDir = join(gitVaultDir, 'storage')
     const config = createDefaultConfig()
 
     if (await exists(gitVaultDir) && !autoConfirm) {
-      const confirmed = terminal.confirm(
+      const confirmed = terminal.createConfirm(
         `${bold('gv is already initialized.')} Do you want to re-configure it?`,
         false,
       )
@@ -139,13 +140,14 @@ export async function initializeVault(
     console.log(bold('Creating .vault directory...'))
     await ensureDir(gitVaultDir)
     await ensureDir(storageDir)
+    directoryCreated = true
 
     if (await isOpAvailable()) {
       console.log('1Password CLI detected.')
 
-      const use1Password = autoConfirm ? false : terminal.confirm(
+      const use1Password = autoConfirm ? false : terminal.createConfirm(
         'Would you like to use 1Password for password storage instead of local files?',
-        false,
+        true,
       )
 
       if (use1Password) {
@@ -154,6 +156,7 @@ export async function initializeVault(
         if (!(await isSignedIn())) {
           terminal.error('Not signed in to 1Password CLI')
           console.warn('Please sign in using "op signin" and try again.')
+          if (directoryCreated) await cleanupGitVaultDir()
           return false
         }
 
@@ -165,20 +168,17 @@ export async function initializeVault(
         if (vaults.length === 0) {
           terminal.error('No 1Password vaults found')
           console.log('Please create at least one vault in 1Password and try again.')
+          if (directoryCreated) await cleanupGitVaultDir()
           return false
         }
 
-        console.log('Available 1Password vaults:')
-        vaults.forEach((vault, i) => console.log(`  ${i + 1}. ${vault}`))
-        console.log('  0. Enter a custom vault name')
-
-        const selection = terminal.promptSelect(
+        const selection = terminal.createPromptSelect(
           'Select a 1Password vault to use:',
           [...vaults, 'Enter a custom vault name'],
         ) || vaults[0] || DEFAULT_1PASSWORD_VAULT
 
         config.onePasswordVault = selection === 'Enter a custom vault name'
-          ? terminal.promptInput('Enter the vault name: ', DEFAULT_1PASSWORD_VAULT)
+          ? terminal.createPromptInput('Enter the vault name: ', DEFAULT_1PASSWORD_VAULT)
           : selection
 
         terminal.success(`Using 1Password vault: '${config.onePasswordVault}'`)
@@ -197,8 +197,8 @@ export async function initializeVault(
     if (await isLfsAvailable()) {
       console.log('Git LFS detected. Setting up LFS for gv...')
 
-      await initLfs(resolvedPath)
-      await configureLfs(resolvedPath, '.vault/storage/*.tar.gz.gpg')
+      await initLfs(workspacePath)
+      await configureLfs(workspacePath, '.vault/storage/*.tar.gz.gpg')
 
       console.log('Git LFS configured for gv archives.')
     } else {
@@ -206,16 +206,16 @@ export async function initializeVault(
       console.log('For better performance with large files, consider installing Git LFS.')
     }
 
-    await writeGitVaultConfig(resolvedPath, config)
+    await writeGitVaultConfig(workspacePath, config)
 
     console.log('Updating .gitignore...')
 
     const ignorePatterns = ['.vault/*.pw', '.vault/*.pw.1p']
-    await updateGitignore(resolvedPath, ignorePatterns)
+    await updateGitignore(workspacePath, ignorePatterns, { mode: 'add' })
 
     console.log('Installing Git hooks...')
 
-    const hooks = await installHooks(resolvedPath, gitVaultDir)
+    const hooks = await installHooks(workspacePath, gitVaultDir)
 
     if (hooks) {
       console.log('Git hooks installed successfully.')
@@ -257,6 +257,7 @@ export async function initializeVault(
     return true
   } catch (error) {
     terminal.error('Initialization failed', error)
+    if (directoryCreated) await cleanupGitVaultDir()
     return false
   }
 }

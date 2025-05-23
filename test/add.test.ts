@@ -4,6 +4,8 @@ import { exists } from '@std/fs'
 import { initializeVault } from '../src/utils/initialize-vault.ts'
 import add from '../src/commands/add.ts'
 import { setupTestEnvironment } from './mocks/test-utils.ts'
+import { getGitVaultConfigPath } from '../src/utils/config.ts'
+import terminal from '../src/utils/terminal.ts'
 
 /**
  * Creates a temporary Git repository for testing
@@ -90,15 +92,12 @@ async function verifyFileAdded(repoPath: string, expectedPath: string) {
   assert(await exists(storageDir), join('.vault', 'storage directory should exist'))
 
   // Check config.json contains the managed path
-  const configPath = join(gitVaultDir, 'config.json')
+  const configPath = getGitVaultConfigPath(repoPath)
   assert(await exists(configPath), 'config.json should exist')
 
   const configContent = await Deno.readTextFile(configPath)
-  console.log('DEBUG Config content:', configContent)
 
   const config = JSON.parse(configContent)
-  console.log('DEBUG Config parsed:', JSON.stringify(config, null, 2))
-  console.log('DEBUG Looking for path:', expectedPath)
 
   assert(config.managedPaths?.length > 0, 'managedPaths should not be empty')
 
@@ -157,7 +156,7 @@ Deno.test({
     const { repoPath, cleanup, testFiles } = await setupGitVaultRepo()
 
     try {
-      await add({ _: [testFiles.filePath], workspace: repoPath })
+      await add({ item: testFiles.filePath, workspace: repoPath })
       await verifyFileAdded(repoPath, 'secret.txt')
     } finally {
       testEnv.restore()
@@ -173,7 +172,7 @@ Deno.test({
     const { repoPath, cleanup, testFiles } = await setupGitVaultRepo()
 
     try {
-      await add({ _: [testFiles.directoryPath], workspace: repoPath })
+      await add({ item: testFiles.directoryPath, workspace: repoPath })
       await verifyFileAdded(repoPath, 'secret-dir/')
     } finally {
       testEnv.restore()
@@ -190,7 +189,7 @@ Deno.test({
 
     try {
       console.log('First add attempt:')
-      await add({ _: [testFiles.filePath], workspace: repoPath })
+      await add({ item: testFiles.filePath, workspace: repoPath })
 
       let initialManifest = ''
       const manifestPath = join(repoPath, '.vault', 'paths.list')
@@ -199,7 +198,7 @@ Deno.test({
       }
 
       console.log('Second add attempt (should be rejected without password prompt):')
-      await add({ _: [testFiles.filePath], workspace: repoPath })
+      await add({ item: testFiles.filePath, workspace: repoPath })
 
       let finalManifest = ''
       if (await exists(manifestPath)) {
@@ -239,7 +238,7 @@ Deno.test({
         initialManifest = await Deno.readTextFile(manifestPath)
       }
 
-      await add({ _: [nonExistentPath], workspace: repoPath })
+      await add({ item: nonExistentPath, workspace: repoPath })
 
       let finalManifest = ''
       if (await exists(manifestPath)) {
@@ -273,7 +272,7 @@ Deno.test({
       }
       await Deno.writeFile(largePath, buffer)
 
-      await add({ _: [largePath], workspace: repoPath })
+      await add({ item: largePath, workspace: repoPath })
       await verifyFileAdded(repoPath, 'large-file.bin')
     } finally {
       testEnv.restore()
@@ -301,7 +300,7 @@ Deno.test({
 
       for (const path of specialPaths) {
         await Deno.writeTextFile(path, 'test content')
-        await add({ _: [path], workspace: repoPath })
+        await add({ item: path, workspace: repoPath })
         await verifyFileAdded(repoPath, relative(repoPath, path))
       }
 
@@ -311,10 +310,10 @@ Deno.test({
 
       // The add command should complete without error but the file won't be added
       // since the compression utility will reject it
-      await add({ _: [atPath], workspace: repoPath })
+      await add({ item: atPath, workspace: repoPath })
 
       // Check that the file was NOT added to the config
-      const configPath = join(repoPath, '.vault', 'config.json')
+      const configPath = getGitVaultConfigPath(repoPath)
       const configContent = JSON.parse(await Deno.readTextFile(configPath))
 
       // None of the managed paths should contain '@file-with-at.txt'
@@ -345,11 +344,11 @@ Deno.test({
       const deepFilePath = join(deepPath, 'deep-file.txt')
       await Deno.writeTextFile(deepFilePath, 'deep file content')
 
-      await add({ _: [deepFilePath], workspace: repoPath })
+      await add({ item: deepFilePath, workspace: repoPath })
       await verifyFileAdded(repoPath, relative(repoPath, deepFilePath))
 
       // Test adding the entire deep directory
-      await add({ _: [deepPath], workspace: repoPath })
+      await add({ item: deepPath, workspace: repoPath })
       await verifyFileAdded(repoPath, `${relative(repoPath, deepPath)}/`)
     } finally {
       testEnv.restore()
@@ -439,12 +438,19 @@ Deno.test({
         }
 
         try {
+          // Check if the file already exists (handles case-insensitive filesystems)
+          const fileExists = await Deno.stat(testPath).then(() => true).catch(() => false)
+          if (fileExists) {
+            console.log(`Skipping duplicate path on case-insensitive filesystem: ${path}`)
+            continue
+          }
+
           await Deno.mkdir(dirname(testPath), { recursive: true })
           await Deno.writeTextFile(testPath, 'test content')
 
           // Use the original path for the add command to test path handling
           const pathToAdd = path.startsWith(repoPath) ? path : testPath
-          await add({ _: [pathToAdd], workspace: repoPath })
+          await add({ item: pathToAdd, workspace: repoPath })
 
           // For verification, we need the path relative to repoPath
           const relPath = relative(repoPath, testPath)
@@ -456,6 +462,15 @@ Deno.test({
             console.log(`Skipping unsupported path on this platform: ${path}`)
             continue
           }
+
+          // Check if this is a case-insensitive filesystem collision
+          // This happens on macOS when 'CaseSensitive/File.txt' and 'casesensitive/file.txt'
+          // resolve to the same file
+          if (error instanceof Error && error.message.includes('Path already managed')) {
+            console.log(`Skipping duplicate path on case-insensitive filesystem: ${path}`)
+            continue
+          }
+
           throw error
         }
       }
@@ -483,7 +498,7 @@ Deno.test({
 
       try {
         // Now use a relative path from the new working directory
-        await add({ _: [`./${relativeFilePath}`], workspace: repoPath })
+        await add({ item: `./${relativeFilePath}`, workspace: repoPath })
         await verifyFileAdded(repoPath, relativeFilePath)
       } finally {
         // Restore original working directory
@@ -493,14 +508,169 @@ Deno.test({
       // Test absolute path
       const absoluteFilePath = join(repoPath, 'absolute-file.txt')
       await Deno.writeTextFile(absoluteFilePath, 'absolute content')
-      await add({ _: [absoluteFilePath], workspace: repoPath })
+      await add({ item: absoluteFilePath, workspace: repoPath })
       await verifyFileAdded(repoPath, 'absolute-file.txt')
 
       // Test path with parent directory reference
       const parentPath = join(repoPath, '..', basename(repoPath), 'parent-ref-file.txt')
       await Deno.writeTextFile(parentPath, 'parent ref content')
-      await add({ _: [parentPath], workspace: repoPath })
+      await add({ item: parentPath, workspace: repoPath })
       await verifyFileAdded(repoPath, 'parent-ref-file.txt')
+    } finally {
+      testEnv.restore()
+      await cleanup()
+    }
+  },
+})
+
+Deno.test({
+  name: 'add: with 1Password storage integration',
+  async fn() {
+    const testEnv = setupTestEnvironment()
+    const { path: repoPath, cleanup } = await createTempGitRepo()
+
+    try {
+      // Create a comprehensive mock for 1Password operations
+      const mockCreatedItems = new Map<
+        string,
+        { password: string; fields: Record<string, string> }
+      >()
+
+      // Mock the global Deno.Command to intercept 'op' commands
+      const originalCommand = globalThis.Deno.Command
+      globalThis.Deno.Command = class MockCommand {
+        constructor(private command: string, private options: { args?: string[] }) {}
+
+        output() {
+          if (this.command === 'op') {
+            const args = this.options.args || []
+
+            if (args[0] === '--version') {
+              return { success: true, code: 0, stdout: new Uint8Array(), stderr: new Uint8Array() }
+            }
+
+            if (args[0] === 'whoami') {
+              return { success: true, code: 0, stdout: new Uint8Array(), stderr: new Uint8Array() }
+            }
+
+            if (args[0] === 'vault' && args[1] === 'list') {
+              const vaults = JSON.stringify([
+                { name: 'Git-Vault' },
+                { name: 'Personal' },
+              ])
+              return {
+                success: true,
+                code: 0,
+                stdout: new TextEncoder().encode(vaults),
+                stderr: new Uint8Array(),
+              }
+            }
+
+            if (args[0] === 'item' && args[1] === 'create') {
+              const titleIndex = args.indexOf('--title') + 1
+              const _vaultIndex = args.indexOf('--vault') + 1
+              const itemName = args[titleIndex]
+
+              // Extract password and fields
+              const password = args.find((arg: string) =>
+                arg.startsWith('password=')
+              )?.split('=')[1] || 'test-password'
+              const fields: Record<string, string> = {}
+
+              for (const arg of args) {
+                if (arg.includes('=') && !arg.startsWith('password=')) {
+                  const [key, value] = arg.split('=')
+                  fields[key] = value
+                }
+              }
+
+              mockCreatedItems.set(itemName, { password, fields })
+              return { success: true, code: 0, stdout: new Uint8Array(), stderr: new Uint8Array() }
+            }
+          }
+
+          // For all other commands, use original Command
+          return new originalCommand(this.command, this.options).output()
+        }
+      } as unknown as typeof Deno.Command
+
+      // Override terminal methods to simulate user choosing 1Password
+      const originalCreateConfirm = terminal.createConfirm
+      terminal.createConfirm = (message: string, defaultValue = false) => {
+        if (message.includes('1Password for password storage')) {
+          return true // User chooses 1Password
+        }
+        if (message.includes('Would you like to create one')) {
+          return true // User wants to create vault
+        }
+        return defaultValue
+      }
+
+      const originalCreatePromptSelect = terminal.createPromptSelect
+      terminal.createPromptSelect = (message: string, options: string[]) => {
+        if (message.includes('Select a 1Password vault')) {
+          return 'Git-Vault' // User selects Git-Vault
+        }
+        return options[0] || ''
+      }
+
+      // Initialize vault with 1Password support (autoConfirm = false to trigger prompts)
+      await initializeVault(repoPath, false)
+
+      // Verify vault was initialized with 1Password storage mode
+      const configPath = getGitVaultConfigPath(repoPath)
+      const configContent = JSON.parse(await Deno.readTextFile(configPath))
+      assertEquals(configContent.storageMode, '1password', 'Storage mode should be 1password')
+      assertEquals(configContent.onePasswordVault, 'Git-Vault', 'Should use Git-Vault vault')
+
+      // Create test file
+      await createTestFiles(repoPath)
+
+      // Add file using 1Password storage - use relative path like real users would
+      await add({ item: 'secret.txt', workspace: repoPath })
+
+      // Verify file was added to config
+      const updatedConfig = JSON.parse(await Deno.readTextFile(configPath))
+      assert(updatedConfig.managedPaths.length > 0, 'Should have managed paths')
+
+      const managedPath = updatedConfig.managedPaths[0]
+      const actualPath = basename(managedPath.path)
+      assertEquals(actualPath, 'secret.txt', 'Should have correct path')
+
+      // Verify password was stored in 1Password mock
+      const expectedItemName = `gv-${basename(repoPath)}-${managedPath.hash}`
+      assert(
+        mockCreatedItems.has(expectedItemName),
+        `Should have created 1Password item: ${expectedItemName}`,
+      )
+
+      const mockItem = mockCreatedItems.get(expectedItemName)
+      assert(mockItem, 'Mock item should exist')
+      assertEquals(mockItem.password, 'test-password', 'Should store correct password')
+      assertEquals(mockItem.fields.path, actualPath, 'Should store correct path field')
+      assertEquals(mockItem.fields.status, 'active', 'Should store correct status field')
+
+      // Verify .pw.1p marker file was created instead of .pw file
+      const pwMarkerFile = join(repoPath, '.vault', `gv-${managedPath.hash}.pw.1p`)
+      assert(await exists(pwMarkerFile), '1Password marker file should exist')
+
+      const pwFile = join(repoPath, '.vault', `gv-${managedPath.hash}.pw`)
+      assert(!await exists(pwFile), 'Password file should not exist when using 1Password')
+
+      // Verify encrypted archive was created
+      const archivePath = join(repoPath, '.vault', 'storage', 'secret.txt.tar.gz.gpg')
+      assert(await exists(archivePath), 'Encrypted archive should exist')
+
+      // Verify .gitignore was updated correctly
+      const gitignoreContent = await Deno.readTextFile(join(repoPath, '.gitignore'))
+      assert(gitignoreContent.includes('/secret.txt'), 'Should ignore the original file')
+      assert(gitignoreContent.includes('.vault/*.pw'), 'Should ignore password files')
+      assert(gitignoreContent.includes('.vault/*.pw.1p'), 'Should ignore 1Password marker files')
+
+      // Restore original functions
+      globalThis.Deno.Command = originalCommand
+      terminal.createConfirm = originalCreateConfirm
+      terminal.createPromptSelect = originalCreatePromptSelect
     } finally {
       testEnv.restore()
       await cleanup()

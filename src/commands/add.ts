@@ -1,4 +1,4 @@
-import { join, relative, resolve } from '@std/path'
+import { isAbsolute, join, relative, resolve } from '@std/path'
 import { ensureDir } from '@std/fs'
 import { bold, cyan, yellow } from '@std/fmt/colors'
 import { generateHash } from '../utils/crypto.ts'
@@ -15,23 +15,25 @@ import {
 import { encryptFile } from '../services/gpg.ts'
 import { createPasswordItem, isOpAvailable, isSignedIn } from '../services/op.ts'
 import terminal from '../utils/terminal.ts'
-import type { BaseCommandArgs, CommandHandler } from '../types.ts'
+import type { CommandArgs, CommandHandler } from '../types.ts'
 import { dedent } from '@qnighy/dedent'
 import { readGitVaultConfig, writeGitVaultConfig } from '../utils/config.ts'
 import { DEFAULT_1PASSWORD_VAULT } from '../constants.ts'
 import { initializeVault, isVaultInitialized } from '../utils/initialize-vault.ts'
+import { PATHS } from '../paths.ts'
 
 /**
  * Adds a file or directory to gv by encrypting it and storing it in the repository
  */
-async function run(args: BaseCommandArgs): Promise<void> {
-  const pathToProtect = args._[0]
-
-  if (!pathToProtect) {
-    terminal.error(bold('No path specified'))
+async function run(args: CommandArgs): Promise<void> {
+  if (!args.item) {
+    terminal.error('No path to an item to add specified')
     console.log(dedent`${bold('Usage:')} ${cyan('gv add')} ${yellow('<path>')}`)
     return
   }
+
+  // Handle both absolute and relative paths correctly
+  const pathToProtected = isAbsolute(args.item) ? args.item : join(args.workspace, args.item)
 
   try {
     const repoRoot = await getRepositoryRoot(args.workspace as string)
@@ -42,9 +44,9 @@ async function run(args: BaseCommandArgs): Promise<void> {
 
     // Check if vault needs initialization
     if (!await isVaultInitialized(repoRoot)) {
-      const confirmed = terminal.confirm(
-        `A vault was not detected in ${repoRoot}. Would you like to create one and add ${pathToProtect}?`,
-        true, // Default to yes
+      const confirmed = terminal.createConfirm(
+        `A vault was not detected in ${repoRoot}. Would you like to create one and add ${pathToProtected}?`,
+        true,
       )
       if (!confirmed) {
         console.log('Vault creation cancelled. Exiting.')
@@ -70,28 +72,56 @@ async function run(args: BaseCommandArgs): Promise<void> {
       return
     }
 
-    const resolvedPath = resolve(pathToProtect)
     try {
-      const stat = await Deno.stat(resolvedPath)
+      const stat = await Deno.stat(pathToProtected)
       if (!stat.isFile && !stat.isDirectory) {
-        terminal.error(`'${pathToProtect}' is not a file or directory`)
+        terminal.error(`'${pathToProtected}' is not a file or directory`)
         return
       }
     } catch {
-      terminal.error(`'${pathToProtect}' does not exist`)
+      terminal.error(`'${pathToProtected}' does not exist`)
       return
     }
 
-    // Ensure path is truly relative to the repo root
-    let relativePath = relative(repoRoot, resolvedPath)
+    // Normalize both paths for consistent comparison
+    const normalizedRepoRoot = resolve(repoRoot)
+    const normalizedPathToProtected = resolve(pathToProtected)
 
-    // Remove any leading "../" prefixes which can happen with complex paths
-    // We only care about the final path within the repo
-    while (relativePath.startsWith('../')) {
-      relativePath = relativePath.substring(3)
+    // Verify the file is actually inside the repository
+    // Use realPath for validation to handle symlinks (like /var -> /private/var on macOS)
+    const realRepoRoot = await Deno.realPath(repoRoot)
+    const realPathToProtected = await Deno.realPath(pathToProtected)
+
+    if (
+      !normalizedPathToProtected.startsWith(`${normalizedRepoRoot}/`) &&
+      normalizedPathToProtected !== normalizedRepoRoot
+    ) {
+      // Try again with real paths to handle symlinks
+      if (
+        !realPathToProtected.startsWith(`${realRepoRoot}/`) &&
+        realPathToProtected !== realRepoRoot
+      ) {
+        terminal.error(`Path '${pathToProtected}' is not inside the repository '${repoRoot}'`)
+        return
+      }
     }
 
-    const isDirectory = (await Deno.stat(resolvedPath)).isDirectory
+    // Calculate relative path using consistent normalized paths
+    let relativePath = relative(realRepoRoot, realPathToProtected)
+    /**
+    // NOTE: KEEP THESE HERE. PATHS BREAK ALL THE TIME
+    // DEBUG: Log the path calculations
+    console.log('DEBUG paths:')
+    console.log('  repoRoot:', repoRoot)
+    console.log('  pathToProtected:', pathToProtected)
+    console.log('  normalizedRepoRoot:', normalizedRepoRoot)
+    console.log('  normalizedPathToProtected:', normalizedPathToProtected)
+    console.log('  realRepoRoot:', realRepoRoot)
+    console.log('  realPathToProtected:', realPathToProtected)
+    console.log('  relativePath:', relativePath)
+    */
+    // Add trailing slash for directories
+    const isDirectory = (await Deno.stat(pathToProtected)).isDirectory
     if (isDirectory && !relativePath.endsWith('/')) {
       relativePath += '/'
     }
@@ -100,23 +130,40 @@ async function run(args: BaseCommandArgs): Promise<void> {
 
     const pathIndex = config.managedPaths.findIndex((p) => p.hash === pathHash)
     if (pathIndex !== -1) {
-      terminal.error(
-        `${bold('Path already managed:')} '${cyan(relativePath)}' (hash: ${yellow(pathHash)})`,
-      )
+      terminal.error(`Path already managed: '${relativePath}' (hash: ${pathHash})`)
       return
     }
 
-    console.log(bold('\nEncryption Setup:'))
-    const password = terminal.promptPassword(`${bold('Enter password:')} `)
-    const confirmPassword = terminal.promptPassword(`${bold('Confirm password:')} `)
+    terminal.section('Encryption Setup:')
+    let password = ''
+    let confirmPassword = ''
 
-    if (password !== confirmPassword) {
-      terminal.error('Passwords do not match')
-      return
+    // Password input loop
+    while (true) {
+      password = terminal.createPromptPassword('Enter password: ')
+
+      // Check for empty password
+      if (!password) {
+        terminal.warn('Password cannot be empty. Please try again.')
+        continue
+      }
+
+      // Check password length
+      if (password.length < 8) {
+        terminal.warn('Password is less than 8 characters long')
+      }
+
+      confirmPassword = terminal.createPromptPassword('Confirm password: ')
+
+      // Check if passwords match
+      if (password !== confirmPassword) {
+        terminal.warn('Passwords do not match. Please try again.')
+        continue
+      }
+
+      // If we've made it here, passwords are valid
+      break
     }
-
-    // Password should never be empty, but we'll proceed with tests even if it is
-    // as our mock terminal in test provides a valid password
 
     const archiveName = relativePath.replaceAll('/', '-')
     const archivePath = join(storageDir, `${archiveName}.tar.gz.gpg`)
@@ -124,7 +171,7 @@ async function run(args: BaseCommandArgs): Promise<void> {
     const tempDir = await Deno.makeTempDir()
     try {
       const tempArchivePath = join(tempDir, 'archive.tar.gz')
-      const archiveSuccess = await createArchive(resolvedPath, tempArchivePath)
+      const archiveSuccess = await createArchive(pathToProtected, tempArchivePath)
 
       if (!archiveSuccess) {
         terminal.error('Failed to create archive')
@@ -138,7 +185,7 @@ async function run(args: BaseCommandArgs): Promise<void> {
         return
       }
 
-      const passwordFile = join(gitVaultDir, `gv-${pathHash}.pw`)
+      const passwordFile = join(gitVaultDir, `${PATHS.BASE_NAME}-${pathHash}.pw`)
 
       if (config.storageMode === '1password') {
         if (!await isOpAvailable()) {
@@ -146,14 +193,17 @@ async function run(args: BaseCommandArgs): Promise<void> {
           return
         }
 
-        if (!await isSignedIn()) {
-          terminal.error('Not signed in to 1Password CLI')
+        const signedIn = await isSignedIn()
+        if (!signedIn) {
+          terminal.error(
+            'Failed to sign in to 1Password. Please try again or check your credentials.',
+          )
           return
         }
 
         const vaultName = config.onePasswordVault || DEFAULT_1PASSWORD_VAULT
         const projectName = await getProjectName(repoRoot)
-        const itemName = `gv-${projectName}-${pathHash}`
+        const itemName = `${PATHS.BASE_NAME}-${projectName}-${pathHash}`
 
         const createSuccess = await createPasswordItem(
           itemName,
@@ -170,12 +220,8 @@ async function run(args: BaseCommandArgs): Promise<void> {
           return
         }
 
-        await Deno.writeTextFile(join(gitVaultDir, `gv-${pathHash}.pw.1p`), '')
-        console.log(
-          `${bold('Password stored in 1Password.')} Marker file created: ${
-            cyan(`${passwordFile}.1p`)
-          }`,
-        )
+        await Deno.writeTextFile(join(gitVaultDir, `${PATHS.BASE_NAME}-${pathHash}.pw.1p`), '')
+        terminal.info('Password stored in 1Password.', `Marker file created: ${passwordFile}.1p`)
       } else {
         await Deno.writeTextFile(passwordFile, password)
         if (Deno.build.os !== 'windows') {
@@ -187,31 +233,27 @@ async function run(args: BaseCommandArgs): Promise<void> {
               stderr: 'null',
             }).output()
           } catch {
-            console.warn(`Could not set secure permissions for ${passwordFile} on Windows`)
+            terminal.warn(`Could not set secure permissions for ${passwordFile} on Windows`)
           }
         }
-        console.log(`${bold('Password saved in:')} ${cyan(passwordFile)}`)
+        terminal.info('Password saved in:', passwordFile)
       }
 
       const archiveSize = await getFileSizeMB(archivePath)
 
       if (archiveSize >= config.lfsThresholdMB) {
-        console.warn(
-          `${bold('Archive size:')} ${cyan(`${archiveSize.toFixed(2)}MB`)} (exceeds threshold: ${
-            yellow(`${config.lfsThresholdMB}MB`)
-          })`,
+        terminal.warn(
+          `Archive size: ${
+            archiveSize.toFixed(2)
+          }MB (exceeds threshold: ${config.lfsThresholdMB}MB)`,
         )
 
         if (await isLfsAvailable()) {
-          console.log(bold('Configuring Git LFS for this archive...'))
+          terminal.status('Configuring Git LFS for this archive...')
           await initLfs(repoRoot)
           await configureLfs(repoRoot, `${relative(repoRoot, storageDir)}/*.tar.gz.gpg`)
         } else {
-          console.log(
-            `${bold('Note:')} Git LFS ${
-              yellow('not available')
-            }. Large archive will be stored directly in Git.`,
-          )
+          terminal.warn('Git LFS not available. Large archive will be stored directly in Git.')
         }
       }
 
@@ -230,7 +272,7 @@ async function run(args: BaseCommandArgs): Promise<void> {
         gitignorePattern,
         pwIgnorePattern,
         pw1pIgnorePattern,
-      ])
+      ], { mode: 'add' })
 
       const filesToStage = [
         relative(repoRoot, archivePath),
@@ -239,22 +281,23 @@ async function run(args: BaseCommandArgs): Promise<void> {
       ]
 
       if (config.storageMode === '1password') {
-        filesToStage.push(relative(repoRoot, join(gitVaultDir, `git-vault-${pathHash}.pw.1p`)))
+        filesToStage.push(
+          relative(repoRoot, join(gitVaultDir, `${PATHS.BASE_NAME}-${pathHash}.pw.1p`)),
+        )
       }
 
       for (const file of filesToStage) {
         await stageFile(file)
       }
 
-      terminal.success(bold('File added successfully!'))
-      console.log(`${bold('Path:')} ${cyan(relativePath)}`)
-      console.log(`${bold('Archive:')} ${cyan(archivePath)}`)
+      terminal.success('File added successfully!')
+      terminal.info('Path:', relativePath)
+      terminal.info('Archive:', archivePath)
 
       if (archiveSize >= config.lfsThresholdMB && await isLfsAvailable()) {
-        console.log(
-          `${bold('Git LFS enabled:')} archive size ${
-            cyan(`${archiveSize.toFixed(2)}MB`)
-          } (threshold: ${yellow(`${config.lfsThresholdMB}MB`)})`,
+        terminal.info(
+          'Git LFS enabled:',
+          `archive size ${archiveSize.toFixed(2)}MB (threshold: ${config.lfsThresholdMB}MB)`,
         )
       }
     } finally {

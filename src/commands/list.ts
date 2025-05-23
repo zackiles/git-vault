@@ -2,16 +2,16 @@ import { join } from '@std/path'
 import { exists } from '@std/fs'
 import { bold, cyan, yellow } from '@std/fmt/colors'
 import terminal from '../utils/terminal.ts'
-import type { BaseCommandArgs, CommandHandler } from '../types.ts'
+import type { CommandArgs, CommandHandler } from '../types.ts'
 import { getRepositoryRoot, isLfsAvailable } from '../services/git.ts'
 import { getFileSizeMB } from '../utils/compression.ts'
-import { dedent } from '@qnighy/dedent'
 import { readGitVaultConfig } from '../utils/config.ts'
+import { PATHS } from '../paths.ts'
 
 /**
  * Lists all files and directories managed by gv
  */
-async function run(args: BaseCommandArgs): Promise<void> {
+async function run(args: CommandArgs): Promise<void> {
   try {
     const repoRoot = await getRepositoryRoot(args.workspace as string)
     if (!repoRoot) {
@@ -35,25 +35,37 @@ async function run(args: BaseCommandArgs): Promise<void> {
       return
     }
 
-    console.log(dedent`\n${bold('Files managed by gv:')}\n`)
-    console.log(dedent`${bold('Storage mode:')} ${cyan(config.storageMode)}\n`)
+    terminal.section('Files managed by gv:')
+    terminal.info('Storage mode:', config.storageMode)
+    console.log('')
 
-    const headers = [bold('Path'), bold('Hash'), bold('Archive Size'), bold('Status')]
-    const columnWidths = [40, 10, 15, 15]
+    // Get console dimensions
+    const { columns } = Deno.consoleSize()
 
+    // Calculate column widths as percentages of the console width
+    // Ensure we leave some padding for visual separation
+    const pathWidth = Math.floor(columns * 0.4)
+    const hashWidth = Math.floor(columns * 0.2)
+    const sizeWidth = Math.floor(columns * 0.15)
+    const statusWidth = Math.floor(columns * 0.15)
+
+    // Define column headers
+    const path = bold('Path')
+    const hashArchive = bold('HashArchive')
+    const size = bold('Size')
+    const status = bold('Status')
+
+    // Print headers with dynamic spacing
     console.log(
-      headers[0].padEnd(columnWidths[0]) +
-        headers[1].padEnd(columnWidths[1]) +
-        headers[2].padEnd(columnWidths[2]) +
-        headers[3],
+      `${path}${' '.repeat(pathWidth - path.length)}` +
+        `${hashArchive}${' '.repeat(hashWidth - hashArchive.length)}` +
+        `${size}${' '.repeat(sizeWidth - size.length)}` +
+        `${status}`,
     )
 
-    console.log(
-      '-'.repeat(columnWidths[0]) +
-        '-'.repeat(columnWidths[1]) +
-        '-'.repeat(columnWidths[2]) +
-        '-'.repeat(columnWidths[3]),
-    )
+    // Adjusted divider line to match the actual content width
+    const totalWidth = pathWidth + hashWidth + sizeWidth + statusWidth
+    console.log('-'.repeat(Math.min(columns, totalWidth)))
 
     for (const { hash, path: pathFromConfig } of config.managedPaths) {
       const archiveName = pathFromConfig.replaceAll('/', '-')
@@ -74,7 +86,7 @@ async function run(args: BaseCommandArgs): Promise<void> {
         status = 'Missing archive'
       }
 
-      const passwordFile = join(gitVaultDir, `gv-${hash}.pw`)
+      const passwordFile = join(gitVaultDir, `${PATHS.BASE_NAME}-${hash}.pw`)
       const passwordFile1p = `${passwordFile}.1p`
 
       if (config.storageMode === '1password' && !await exists(passwordFile1p)) {
@@ -83,9 +95,10 @@ async function run(args: BaseCommandArgs): Promise<void> {
         status = 'Missing password'
       }
 
+      // Truncate long paths with ellipsis
       let displayPath = pathFromConfig
-      if (displayPath.length > columnWidths[0] - 3) {
-        displayPath = `...${displayPath.substring(displayPath.length - (columnWidths[0] - 3))}`
+      if (displayPath.length > pathWidth - 3) {
+        displayPath = `...${displayPath.substring(displayPath.length - (pathWidth - 6))}`
       }
 
       const getStatusColor = (status: string) => {
@@ -93,23 +106,24 @@ async function run(args: BaseCommandArgs): Promise<void> {
         return yellow(status)
       }
 
+      // Print row with dynamic spacing matching the headers
       console.log(
-        displayPath.padEnd(columnWidths[0]) +
-          cyan(hash).padEnd(columnWidths[1]) +
-          archiveSize.padEnd(columnWidths[2]) +
-          getStatusColor(status),
+        `${displayPath}${' '.repeat(Math.max(0, pathWidth - displayPath.length))}` +
+          `${cyan(hash)}${' '.repeat(Math.max(0, hashWidth - hash.length))}` +
+          `${archiveSize}${' '.repeat(Math.max(0, sizeWidth - archiveSize.length))}` +
+          `${getStatusColor(status)}`,
       )
     }
 
-    console.log(dedent`\n${bold('Total:')} ${cyan(`${config.managedPaths.length}`)} file(s)\n`)
+    console.log('')
+    terminal.info('Total:', `${config.managedPaths.length} file(s)`)
+    console.log('')
 
     const lfsAvailable = await isLfsAvailable()
     if (lfsAvailable) {
-      console.log(
-        `${bold('Git LFS')} is available (threshold: ${cyan(`${config.lfsThresholdMB} MB`)})`,
-      )
+      terminal.info('Git LFS', `is available (threshold: ${config.lfsThresholdMB} MB)`)
     } else {
-      console.log(`${bold('Git LFS')} is ${yellow('not available')}`)
+      terminal.warn('Git LFS is not available')
     }
   } catch (error) {
     terminal.error('Failed to list files', error)

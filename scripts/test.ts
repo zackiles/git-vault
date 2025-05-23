@@ -6,9 +6,13 @@
  */
 
 import { dirname, fromFileUrl, join } from '@std/path'
+import { parse } from '@std/jsonc'
 
 const scriptDir = dirname(fromFileUrl(import.meta.url))
 const projectRoot = join(scriptDir, '..')
+const denoJson = parse(await Deno.readTextFile(join(projectRoot, 'deno.json'))) as {
+  version?: string
+}
 
 // Parse all raw arguments from deno task
 const args = Deno.args
@@ -43,6 +47,7 @@ for (let i = 0; i < args.length; i++) {
 const testArgs = [
   'test',
   '-A',
+  '--reporter=pretty',
   '--reload',
   ...cleanedArgs,
 ]
@@ -63,6 +68,7 @@ const command = new Deno.Command('deno', {
   env: {
     ...Deno.env.toObject(),
     'DENO_ENV': 'test',
+    'GV_VERSION': denoJson?.version ?? '',
   },
   stdout: 'inherit',
   stderr: 'inherit',

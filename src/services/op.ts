@@ -27,7 +27,28 @@ async function isOpAvailable(): Promise<boolean> {
 }
 
 /**
- * Checks if the user is signed in to 1Password
+ * Attempts to sign in to 1Password using the CLI
+ *
+ * @returns Promise that resolves to true if signin was successful
+ */
+async function signIn(): Promise<boolean> {
+  try {
+    const command = new Deno.Command('op', {
+      args: ['signin'],
+      stdin: 'inherit',
+      stdout: 'inherit',
+      stderr: 'inherit',
+    })
+
+    const { success } = await command.output()
+    return success
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Checks if the user is signed in to 1Password and attempts to sign in if not
  *
  * @returns Promise that resolves to true if the user is signed in
  */
@@ -40,6 +61,10 @@ async function isSignedIn(): Promise<boolean> {
     })
 
     const { success } = await command.output()
+    if (!success) {
+      terminal.status('Not signed in to 1Password. Attempting to sign in...')
+      return await signIn()
+    }
     return success
   } catch {
     return false
@@ -53,10 +78,6 @@ async function isSignedIn(): Promise<boolean> {
  */
 async function getVaults(): Promise<string[]> {
   try {
-    if (!await isSignedIn()) {
-      return []
-    }
-
     const command = new Deno.Command('op', {
       args: ['vault', 'list', '--format=json'],
       stdout: 'piped',
@@ -94,11 +115,6 @@ async function createPasswordItem(
   fields: Record<string, string> = {},
 ): Promise<boolean> {
   try {
-    if (!await isSignedIn()) {
-      terminal.error('Not signed in to 1Password')
-      return false
-    }
-
     // Prepare arguments for op item create
     const args = [
       'item',
@@ -128,7 +144,7 @@ async function createPasswordItem(
     const { success, stderr } = await command.output()
 
     if (!success) {
-      console.error('Failed to create 1Password item:', new TextDecoder().decode(stderr))
+      terminal.error('Failed to create 1Password item:', new TextDecoder().decode(stderr))
       return false
     }
 
@@ -148,11 +164,6 @@ async function createPasswordItem(
  */
 async function getPassword(itemName: string, vaultName: string): Promise<string | null> {
   try {
-    if (!await isSignedIn()) {
-      terminal.error('Not signed in to 1Password')
-      return null
-    }
-
     const command = new Deno.Command('op', {
       args: ['item', 'get', itemName, '--vault', vaultName, '--fields', 'password'],
       stdout: 'piped',
@@ -188,11 +199,6 @@ async function updateItem(
   fields: Record<string, string>,
 ): Promise<boolean> {
   try {
-    if (!await isSignedIn()) {
-      terminal.error('Not signed in to 1Password')
-      return false
-    }
-
     // Prepare arguments for op item edit
     const args = ['item', 'edit', itemName, '--vault', vaultName]
 
@@ -239,5 +245,6 @@ export {
   isOpAvailable,
   isSignedIn,
   markItemRemoved,
+  signIn,
   updateItem,
 }

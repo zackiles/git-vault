@@ -157,6 +157,9 @@ async function verifyPassword(
   password: string,
 ): Promise<boolean> {
   try {
+    // Use platform-appropriate null device
+    const nullDevice = Deno.build.os === 'windows' ? 'NUL' : '/dev/null'
+
     const gpgProcess = new Deno.Command('gpg', {
       args: [
         '--batch',
@@ -165,7 +168,7 @@ async function verifyPassword(
         password,
         '-d',
         '--output',
-        '/dev/null',
+        nullDevice,
         filepath,
       ],
     })

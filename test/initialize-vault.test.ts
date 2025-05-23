@@ -7,6 +7,7 @@ import { join } from '@std/path'
 import { exists } from '@std/fs'
 import { initializeVault, isVaultInitialized } from '../src/utils/initialize-vault.ts'
 import { setupTestEnvironment } from './mocks/test-utils.ts'
+import { getGitVaultConfigPath } from '../src/utils/config.ts'
 
 /**
  * Creates a temporary Git repository for testing
@@ -94,12 +95,11 @@ async function verifyBasicInitialization(repoPath: string) {
     await exists(join(repoPath, '.vault', 'storage')),
     '.vault/storage directory should exist',
   )
-  assert(
-    await exists(join(repoPath, '.vault', 'config.json')),
-    '.vault/config.json file should exist',
-  )
 
-  const configJson = await Deno.readTextFile(join(repoPath, '.vault', 'config.json'))
+  const configPath = getGitVaultConfigPath(repoPath)
+  assert(await exists(configPath), '.vault/config.json file should exist')
+
+  const configJson = await Deno.readTextFile(configPath)
   const config = JSON.parse(configJson)
 
   assert(typeof config.version === 'number', 'Config should have a version number')
@@ -113,12 +113,10 @@ async function verifyBasicInitialization(repoPath: string) {
  * Verifies Git LFS configurations
  */
 async function verifyLfsConfiguration(repoPath: string) {
-  assert(
-    await exists(join(repoPath, '.vault', 'config.json')),
-    '.vault/config.json file should exist',
-  )
+  const configPath = getGitVaultConfigPath(repoPath)
+  assert(await exists(configPath), '.vault/config.json file should exist')
 
-  const configJson = await Deno.readTextFile(join(repoPath, '.vault', 'config.json'))
+  const configJson = await Deno.readTextFile(configPath)
   const config = JSON.parse(configJson)
 
   assert(typeof config.lfsThresholdMB === 'number', 'Config should have an LFS threshold')

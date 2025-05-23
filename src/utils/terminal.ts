@@ -3,14 +3,44 @@
  */
 
 import { parseArgs, promptSecret } from '@std/cli'
-import type { PromptSelectOptions } from '@std/cli/unstable-prompt-select'
+import type { PromptSecretOptions, PromptSelectOptions } from '@std/cli/unstable-prompt-select'
 import { promptMultipleSelect } from '@std/cli/unstable-prompt-multiple-select'
 import { ProgressBarStream } from '@std/cli/unstable-progress-bar-stream'
 import { promptSelect } from '@std/cli/unstable-prompt-select'
 import { Spinner } from '@std/cli/unstable-spinner'
-import { dedent } from '@qnighy/dedent'
-import { bold, dim, green, red, yellow } from '@std/fmt/colors'
-import type { Command } from '../types.ts'
+import { bold, cyan, green, red, yellow } from '@std/fmt/colors'
+
+const print = (type: string, message: string, extra?: unknown, valueColor = cyan): void => {
+  const isTest = Deno.env.get('DENO_ENV') === 'test'
+  if (isTest && !['error', 'warn'].includes(type)) return
+
+  switch (type) {
+    case 'error': {
+      const errorDetails = extra instanceof Error
+        ? `: ${extra.message}`
+        : extra
+        ? `: ${String(extra)}`
+        : ''
+      console.error(red(`Error: ${message}${errorDetails}`))
+      break
+    }
+    case 'warn':
+      console.warn(yellow(`Warning: ${message}`))
+      break
+    case 'success':
+      console.log(green(`Success: ${message}`))
+      break
+    case 'info':
+      console.log(`${bold(extra as string)} ${valueColor(message)}`)
+      break
+    case 'status':
+      console.log(`${bold(extra as string || '→')} ${message}`)
+      break
+    case 'section':
+      console.log(`\n${bold(message)}`)
+      break
+  }
+}
 
 /**
  * Confirms an action with the user
@@ -19,9 +49,9 @@ import type { Command } from '../types.ts'
  * @param defaultYes Whether the default action is yes
  * @returns True if confirmed, false otherwise
  */
-function confirm(message: string, defaultYes = false): boolean {
+function createConfirm(message: string, defaultYes = false): boolean {
   const values = defaultYes ? ['Yes', 'No'] : ['No', 'Yes']
-  const options: PromptSelectOptions = { indicator: '>', visibleLines: 2 }
+  const options: PromptSelectOptions = { indicator: '>', visibleLines: 2, clear: true }
   const response = promptSelect(message, values, options)
   return response === 'Yes'
 }
@@ -33,8 +63,9 @@ function confirm(message: string, defaultYes = false): boolean {
  * @param defaultValue Default value to use if user enters nothing
  * @returns The user's input
  */
-function promptInput(message: string, defaultValue = ''): string {
-  return prompt(message, defaultValue) || defaultValue
+function createPromptInput(message: string, defaultValue = ''): string {
+  const result = prompt(message, defaultValue, { clear: true })
+  return result || defaultValue
 }
 
 /**
@@ -43,8 +74,8 @@ function promptInput(message: string, defaultValue = ''): string {
  * @param message The prompt message
  * @returns The entered password, guaranteed to be a string (never null)
  */
-function safePromptPassword(message: string): string {
-  return promptSecret(message) || ''
+function createPromptPassword(message: string): string {
+  return promptSecret(message, { clear: true }) || ''
 }
 
 /**
@@ -73,114 +104,67 @@ function createProgressBar(total: number, _message: string): ProgressBarStream {
   return new ProgressBarStream(Deno.stdout.writable, { max: total })
 }
 
-/**
- * Prints a command-specific help menu
- *
- * @param command The command to show help for
- */
-function printCommandHelp(command: Command): void {
-  let output = `\n${bold(command.name)}: ${dim(command.description)}\n`
-
-  if (command.aliases && command.aliases.length > 0) {
-    output += `\n${yellow('Aliases:')} ${command.aliases.join(', ')}\n`
-  }
-
-  if (command.args && command.args.length > 0) {
-    output += `\n${yellow('Arguments:')}\n`
-    for (const arg of command.args) {
-      const required = arg.required ? yellow(' (required)') : ''
-      const defaultValue = arg.default !== undefined ? dim(` (default: ${arg.default})`) : ''
-      output += `  ${bold(arg.name)}${required}${defaultValue}: ${dim(arg.description)}\n`
-    }
-  }
-
-  console.log(output)
-}
-
-/**
- * Prints the main help menu
- *
- * @param commands All available commands
- */
-function printHelp(commands: Command[]): void {
-  const commandsList = commands.map((command) =>
-    `  ${bold(command.name)}: ${dim(command.description)}`
-  ).join('\n')
-
-  const output = dedent`
-    ${bold('Git Vault')} - ${dim('Secure file encryption for Git repositories')}
-
-    ${yellow('Usage:')} ${bold('gv <command> [options]')}
-
-    ${yellow('Commands:')}
-    ${commandsList}
-
-    ${dim('Run')} ${bold('"gv <command> --help"')} ${
-    dim('for more information on a specific command.')
-  }
-  `
-
-  console.log(output)
-}
-
-/**
- * Prints an error message
- *
- * @param message The error message
- * @param error Optional error instance to display details from
- */
 function error(message: string, error?: unknown): void {
-  const errorDetails = error instanceof Error
-    ? `: ${error.message}`
-    : error
-    ? `: ${String(error)}`
-    : ''
-  console.error(red(`Error: ${message}${errorDetails}`))
+  print('error', message, error)
 }
 
-/**
- * Prints a success message
- *
- * @param message The success message
- */
+function warn(message: string): void {
+  print('warn', message)
+}
+
 function success(message: string): void {
-  console.log(green(`Success: ${message}`))
+  print('success', message)
+}
+
+function info(title: string, value: string, valueColor = cyan): void {
+  print('info', value, title, valueColor)
+}
+
+function status(message: string, symbol = '→'): void {
+  print('status', message, symbol)
+}
+
+function section(title: string): void {
+  print('section', title)
 }
 
 /**
  * Prompt the user to select from multiple options, with null safety
  */
-function safePromptSelect(
+function createPromptSelect(
   message: string,
   options: string[],
   selectOptions?: PromptSelectOptions,
 ): string {
-  const result = promptSelect(message, options, selectOptions)
+  const defaultOptions: PromptSelectOptions = { clear: true, indicator: '>' }
+  const result = promptSelect(message, options, { ...defaultOptions, ...selectOptions })
   return (result ?? options[0]) || ''
 }
 
 /**
  * Prompt the user to select multiple options, with null safety
  */
-function safePromptMultipleSelect(
+function createPromptMultiSelect(
   message: string,
   options: string[],
 ): string[] {
-  const result = promptMultipleSelect(message, options)
+  const result = promptMultipleSelect(message, options, { clear: true })
   return result ?? (options.length ? [options[0]] : [])
 }
 
 export default {
   parseArgs,
-  promptPassword: safePromptPassword,
-  confirm,
-  promptInput,
-  printCommandHelp,
-  printHelp,
+  createPromptPassword,
+  createConfirm,
+  createPromptInput,
   error,
+  warn,
   success,
+  info,
+  status,
+  section,
   showSpinner,
   createProgressBar,
-  promptSelect: safePromptSelect,
-  promptMultipleSelect: safePromptMultipleSelect,
+  createPromptSelect,
+  createPromptMultiSelect,
 }

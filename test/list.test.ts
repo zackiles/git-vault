@@ -9,6 +9,7 @@ import add from '../src/commands/add.ts'
 import { initializeVault } from '../src/utils/initialize-vault.ts'
 import list from '../src/commands/list.ts'
 import { setupTestEnvironment } from './mocks/test-utils.ts'
+import { getGitVaultConfigPath } from '../src/utils/config.ts'
 
 async function createTempGitRepo(): Promise<{ path: string; cleanup: () => Promise<void> }> {
   const tempDir = await Deno.makeTempDir({ prefix: 'git-vault-test-' })
@@ -125,7 +126,7 @@ Deno.test({
       await list({ _: [], workspace: repoPath })
       assert(true, 'List command completed without errors')
 
-      const configPath = join(repoPath, '.vault', 'config.json')
+      const configPath = getGitVaultConfigPath(repoPath)
       assert(await exists(configPath), 'Config file should exist')
     } finally {
       testEnv.restore()

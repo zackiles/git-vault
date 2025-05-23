@@ -23,11 +23,17 @@ export function setupTestEnvironment(): TestEnvironment {
   const originalTerminal = { ...terminal };
 
   // Mock terminal methods that require user input
-  terminal.promptPassword = () => 'test-password';
-  terminal.confirm = (_message: string, defaultYes = false) => defaultYes;
-  terminal.promptInput = (_message: string, defaultValue = '') => defaultValue;
-  terminal.promptSelect = (_message: string, options: string[]) => options[0] || '';
-  terminal.promptMultipleSelect = (_message: string, options: string[]) =>
+  terminal.createPromptPassword = () => 'test-password';
+  terminal.createConfirm = (message: string, defaultYes = false) => {
+    // For 1Password prompts, default to false (use file storage) unless explicitly testing 1Password
+    if (message.includes('1Password for password storage')) {
+      return false;
+    }
+    return defaultYes;
+  };
+  terminal.createPromptInput = (_message: string, defaultValue = '') => defaultValue;
+  terminal.createPromptSelect = (_message: string, options: string[]) => options[0] || '';
+  terminal.createPromptMultiSelect = (_message: string, options: string[]) =>
     options.length ? [options[0]] : [];
 
   return {

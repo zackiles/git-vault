@@ -2,13 +2,14 @@
  * Test suite for the remove command
  */
 
-import { assert, assertEquals } from 'jsr:@std/assert'
+import { assert, assertEquals } from '@std/assert'
 import { basename, dirname, join, relative } from '@std/path'
 import { exists } from '@std/fs'
 import add from '../src/commands/add.ts'
 import { initializeVault } from '../src/utils/initialize-vault.ts'
 import remove from '../src/commands/remove.ts'
 import { setupTestEnvironment } from './mocks/test-utils.ts'
+import { getGitVaultConfigPath } from '../src/utils/config.ts'
 
 async function createTempGitRepo(): Promise<{ path: string; cleanup: () => Promise<void> }> {
   const tempDir = await Deno.makeTempDir({ prefix: 'git-vault-test-' })
@@ -82,8 +83,7 @@ async function createTestFiles(repoPath: string): Promise<{
  * Verifies a file was properly removed from git-vault
  */
 async function verifyFileRemoved(repoPath: string, relativePath: string) {
-  const gitVaultDir = join(repoPath, '.vault')
-  const configPath = join(gitVaultDir, 'config.json')
+  const configPath = getGitVaultConfigPath(repoPath)
 
   if (await exists(configPath)) {
     const configContent = await Deno.readTextFile(configPath)
@@ -95,7 +95,7 @@ async function verifyFileRemoved(repoPath: string, relativePath: string) {
   }
 
   const archiveName = relativePath.replaceAll('/', '-')
-  const archivePath = join(gitVaultDir, 'storage', `${archiveName}.tar.gz.gpg`)
+  const archivePath = join(repoPath, '.vault', 'storage', `${archiveName}.tar.gz.gpg`)
   assert(!await exists(archivePath), `Archive ${archivePath} should not exist`)
 
   const originalPath = join(repoPath, relativePath)
@@ -148,7 +148,7 @@ Deno.test({
     try {
       const unmanaged = testFiles.nestedFilePath
 
-      const configPath = join(repoPath, '.vault', 'config.json')
+      const configPath = getGitVaultConfigPath(repoPath)
       let initialConfig = null
       if (await exists(configPath)) {
         const initialConfigContent = await Deno.readTextFile(configPath)
@@ -186,7 +186,7 @@ Deno.test({
     try {
       const nonExistentPath = join(repoPath, 'doesnt-exist.txt')
 
-      const configPath = join(repoPath, '.vault', 'config.json')
+      const configPath = getGitVaultConfigPath(repoPath)
       let initialConfig = null
       if (await exists(configPath)) {
         const initialConfigContent = await Deno.readTextFile(configPath)
