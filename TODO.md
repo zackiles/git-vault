@@ -26,13 +26,14 @@ If the `add` command detects a JSON or YAML file it will prompt a user to ask if
 
 This will tidy up the end-users project by not cluttering the root of their repository with .pw files
 
-### 5 ) ✅ Rename Install to Init
-
-DONE: For the user and within this codebase, completely changed terminology from 'install' to 'init'. The install command is now 'init', code comments and methods use 'init' instead of 'install', and the documentation has been updated to reflect this. The only time 'install' is used is when it comes to specific "install" commands of third parties or terminal commands for things that AREN'T git-vault.
-
 ### 6 ) Project Helpers
 
-During install, check if user has a project config file with tasks in it at the project root, and if so, ask them if they'd like us to optionally add tasks for `git-vault add` and `git-vault remove`. This will greatly improve developer experience by providing a more familiar way for them to interact with git-vault in their projects. Prioritized list to implement:
+During the `add` command, check if user has a project config file with tasks in it at the project root, and if so, ask them if they'd like us to optionally add tasks for `vault:add` and `vault:remove`. This will greatly improve developer experience by providing a more familiar way for them to interact with git-vault in their projects.
+
+- NOTE: also cleanup these tasks on the `remove` command.
+- NOTE: not all packages may support the syntax like `vault:add` with the semi-colon, that's OK. For javascript based configs stick with the lowercase semi-colon, in other languages do what is most typical.
+
+Prioritized list to implement:
 
 | Filename                   | Ecosystem                 | Typical Usage Command               | Popularity (approximate rank)           |
 | -------------------------- | ------------------------- | ----------------------------------- | --------------------------------------- |
@@ -78,56 +79,17 @@ Sorted by **observed popularity in GitHub OSS projects**, focused on repositorie
 
 Once TODOs are fully implemented, tested, and documented, move them here for future reference. TODOs in this section no longer need to be implemented and are kept for historical reasons.
 
-### Git LFS Integration for Large Archives
+### Rename Install to Init
 
-- **Objective**: Automatically configure Git LFS for large encrypted archives to prevent repository bloat while maintaining versioning capabilities.
-- `install.sh` detects if Git LFS is available and sets up LFS tracking for the `storage/*.tar.gz.gpg` pattern.
-- Default threshold of 5MB for LFS tracking can be customized with `--min-lfs=<size>` flag during installation.
-- `add.sh` checks archive size after encryption and dynamically configures LFS tracking for individual files that exceed the threshold.
-- Make this seamless and transparent to the user - no manual LFS setup required.
-- Ensure proper error handling if Git LFS is not available or if LFS setup fails.
-- Add appropriate debug and status messaging when archives are detected as large and tracked via LFS.
-- Explicitly support and efficiently handle binary large objects (images, videos, datasets, etc.) through Git LFS integration.
-- Provide clear documentation that git-vault is fully compatible with binary large objects and any type of file without restrictions.
-- Update documentation and tests to verify LFS integration works correctly across platforms.
-
-### Fix The Broken Test in errors.bats
-
-After a recent change a test started failing that says: (`[Error] add.sh fails if gpg dependency is missing` in `test/errors.bats`) Fix it. Here is some information from the previous developer who last tried to fix it:
-
-1. **Purpose of the Test:**
-   - This test aimed to verify that the `.vault/add.sh` script correctly detects if the required `gpg` (GnuPG) command-line tool is missing from the system's `PATH`.
-   - It should gracefully fail and inform the user about the missing dependency, preventing unexpected errors later during encryption.
-   - The test originally worked by temporarily modifying the `PATH` environment variable within the test's execution context. It pointed `PATH` to a temporary directory containing a fake `gpg` script designed to exit with an error, simulating the absence of the real `gpg`.
-
-2. **Relation to Recent Changes and Why It Failed:**
-   - The test started failing (specifically, timing out) after the "Single Folder for Git Vault" refactoring, which moved scripts from `git-vault/` to `.vault/` and storage to `.vault/storage/`.
-   - While the refactoring primarily changed file paths, the test's method of manipulating the `PATH` environment variable within the Bats testing framework seems to have become unstable.
-   - It's likely that the interaction between the Bats execution environment, the `run` command (which uses subshells), the `PATH` modification, and potentially the script's internal logic created a hang or an exceptionally long execution time, leading to consistent timeouts (>120 seconds). The exact cause of the hang wasn't pinpointed during the previous debug session.
-
-3. **Reason for Skipping:**
-   - Due to the persistent timeouts that could not be quickly resolved, and to allow the rest of the test suite to pass validation, this specific test was marked as `skip`.
-
-4. **Next Steps to Investigate and Fix:**
-   - **Isolate:** Run the test individually using `bats test/errors.bats -f "gpg dependency"` to remove the `test/run-tests.sh` wrapper and simplify the execution environment.
-   - **Debug:** Add verbose tracing (`set -x`) inside the test function in `test/errors.bats` and potentially within the `setup_path_override` function in `test/test_helper.bash` to see exactly where execution hangs.
-   - **Review `add.sh`:** Double-check the dependency check logic within `.vault/add.sh`. Ensure it's robust and doesn't have unexpected behavior when `gpg` isn't found.
-   - **Alternative Simulation:** Explore alternative ways to simulate a missing `gpg` command without altering the `PATH` directly within the test, as this seems fragile. This is challenging in Bash but might involve temporarily renaming the real `gpg` if run in a very controlled environment (use caution) or modifying the script's check if possible (less ideal).
-   - **Evaluate Necessity:** Consider if this specific test case (explicitly checking for a missing dependency via PATH manipulation) provides enough value to justify the debugging effort, given that other tests implicitly rely on `gpg` being present and functional.
+- **Objective**: For the user and within this codebase, completely change terminology from 'install' to 'init'.
+- The install command is now 'init'
+- Code comments and methods use 'init' instead of 'install'
+- Documentation has been updated to reflect this
+- The only time 'install' is used is when it comes to specific "install" commands of third parties or terminal commands for things that AREN'T git-vault.
 
 ### Single Folder for Git Vault
 
 - **Objective**: Reduce clutter in the user's project by centralizing all things related to git-vault(except the git hooks) to a single folder.
 - The single folder on the user's project stores: all `.sh` scripts that are installed, `paths.list`, the main `README.md` of git-vault, and a subfolder for storage.
 - Name the folder `.vault` and the storage subfolder `.vault/storage`.
-- Update all and tests/docs to reflect the new design.
-
-### 2 ) Optionally Install Dependencies for Users
-
-- **Objective**: Make the `install.sh` script intelligently handle installing the dependencies on the users specific platform (windows, macos, linux) if they aren't available, and if the user chooses to.
-- The following is noted in the user-facing README.md "You need gpg, tar, sha1sum (or shasum), and mktemp installed and available in your PATH.". We'll check for those and any others that are needed when the script first starts and ask the user if they'd like us to install them ourselves.
-- Use most typical and best practice ways to install them on the given system
-- Only prompt and install for the 1 or more that are needed specifically
-- If one or more fails, exit while providing the reason it failed and returning the actual error message from the system
-- Architect in such a way that its easy for maintainers of this project to modify which dependencies will be auto-installed and their specific install method
 - Update all and tests/docs to reflect the new design.
