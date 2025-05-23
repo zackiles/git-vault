@@ -1,10 +1,7 @@
 .vault/*.pw
 
-# Keep storage tracked
-!.vault/storage
-
 # Repomix context file. Don't commit, generate locally when needed.
-codebase-summary.xml
+snapshot.xml
 
 # Git-Vault test temporary files
 tmp/

@@ -33,7 +33,7 @@ print_help() {
 set -e
 
 trap 'last_command=$current_command; current_command=$BASH_COMMAND' DEBUG
-trap 'echo "ERROR: Command \"${last_command}\" failed with exit code $? at line ${LINENO}"' ERR
+trap 'echo "ERROR: Command \"${last_command}\" failed with exit code $? at line ${LINENO}" >&2' ERR
 
 REPO_OWNER="zackiles"
 REPO_NAME="git-vault"
@@ -58,11 +58,12 @@ NC='\033[0m'
 print_message() {
   local color="$1"
   local message="$2"
-  echo -e "${color}${message}${NC}"
+  local fd="${3:-1}"  # Default to stdout (fd 1)
+  echo -e "${color}${message}${NC}" >&"$fd"
 }
 
 error() {
-  print_message "${RED}" "ERROR: $1"
+  print_message "${RED}" "ERROR: $1" 2  # Send to stderr (fd 2)
   exit 1
 }
 
@@ -553,16 +554,26 @@ main() {
 
     if [ $COMP_RESULT -eq 2 ]; then
       info "Current version is the same as target version"
-      read -p "Do you want to reinstall gv $CURRENT_VERSION? (y/n) " REINSTALL
-      if [ "$REINSTALL" != "y" ] && [ "$REINSTALL" != "Y" ]; then
-        info "Installation cancelled"
+      if [ "$INTERACTIVE" = "true" ]; then
+        read -p "Do you want to reinstall gv $CURRENT_VERSION? (y/n) " REINSTALL
+        if [ "$REINSTALL" != "y" ] && [ "$REINSTALL" != "Y" ]; then
+          info "Installation cancelled"
+          exit 0
+        fi
+      else
+        info "Non-interactive mode: skipping reinstall of same version ($CURRENT_VERSION)"
         exit 0
       fi
     elif [ $COMP_RESULT -eq 1 ]; then
       warning "Target version ($VERSION) is older than current version ($CURRENT_VERSION)"
-      read -p "Do you want to downgrade to $VERSION? (y/n) " DOWNGRADE
-      if [ "$DOWNGRADE" != "y" ] && [ "$DOWNGRADE" != "Y" ]; then
-        info "Installation cancelled"
+      if [ "$INTERACTIVE" = "true" ]; then
+        read -p "Do you want to downgrade to $VERSION? (y/n) " DOWNGRADE
+        if [ "$DOWNGRADE" != "y" ] && [ "$DOWNGRADE" != "Y" ]; then
+          info "Installation cancelled"
+          exit 0
+        fi
+      else
+        info "Non-interactive mode: skipping downgrade from $CURRENT_VERSION to $VERSION"
         exit 0
       fi
     else
