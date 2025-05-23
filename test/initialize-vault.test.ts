@@ -168,8 +168,9 @@ Deno.test({
 Deno.test({
   name: 'initialize-vault: graceful failure if target is not a Git repository',
   async fn() {
-    const testEnv = setupTestEnvironment()
     const { path, cleanup } = await createTempNonGitDir()
+    // Explicitly indicate this is not a Git repo by passing null
+    const testEnv = setupTestEnvironment({ gitRepoPath: null as any })
 
     try {
       const initialized = await initializeVault(path, true)
@@ -206,8 +207,8 @@ Deno.test({
 Deno.test({
   name: 'initialize-vault: respects custom Git hooks path',
   async fn() {
-    const testEnv = setupTestEnvironment()
     const { path, cleanup } = await createTempGitRepo()
+    const testEnv = setupTestEnvironment({ gitRepoPath: path })
 
     try {
       const customHooksPath = join(path, '.githooks')
