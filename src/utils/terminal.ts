@@ -3,7 +3,7 @@
  */
 
 import { parseArgs, promptSecret } from '@std/cli'
-import type { PromptSecretOptions, PromptSelectOptions } from '@std/cli/unstable-prompt-select'
+import type { PromptSelectOptions } from '@std/cli/unstable-prompt-select'
 import { promptMultipleSelect } from '@std/cli/unstable-prompt-multiple-select'
 import { ProgressBarStream } from '@std/cli/unstable-progress-bar-stream'
 import { promptSelect } from '@std/cli/unstable-prompt-select'
@@ -64,7 +64,7 @@ function createConfirm(message: string, defaultYes = false): boolean {
  * @returns The user's input
  */
 function createPromptInput(message: string, defaultValue = ''): string {
-  const result = prompt(message, defaultValue, { clear: true })
+  const result = prompt(message, defaultValue)
   return result || defaultValue
 }
 
