@@ -17,6 +17,7 @@ print_help() {
   echo "  --local-zip PATH       Use local zip file (for testing)"
   echo "  --help, -h             Show this help message"
   echo "  --verbose, -v          Enable verbose debugging output"
+  echo "  --debug, -d            Enable debug mode (very verbose)"
   echo ""
   echo "Description:"
   echo "  This script downloads and installs gv, a tool for securely"
@@ -28,6 +29,7 @@ print_help() {
   echo "  ./install.sh --uninstall             # Uninstall gv using built-in command"
   echo "  ./install.sh --local-zip ./path.zip  # Use local zip file"
   echo "  ./install.sh --verbose               # Install with verbose output"
+  echo "  ./install.sh --debug                 # Install with debug output"
 }
 
 set -e
@@ -79,6 +81,12 @@ warning() {
   print_message "${YELLOW}" "WARNING: $1"
 }
 
+debug() {
+  if [ "$DEBUG" = "true" ]; then
+    print_message "${BLUE}" "DEBUG: $1"
+  fi
+}
+
 compare_versions() {
   local v1="${1#v}"
   local v2="${2#v}"
@@ -106,15 +114,24 @@ compare_versions() {
 detect_platform() {
   local os
   local arch
+  local uname_s=$(uname -s)
+  local uname_m=$(uname -m)
 
-  case "$(uname -s)" in
+  case "$uname_s" in
     Linux*)  os="linux";;
     Darwin*) os="macos";;
     MINGW*|MSYS*|CYGWIN*) os="windows";;
-    *)       error "Unsupported operating system: $(uname -s)";;
+    *)       error "Unsupported operating system: $uname_s
+
+Supported operating systems:
+- Linux (any distribution)
+- macOS (Darwin)
+- Windows (MINGW/MSYS/Cygwin)
+
+If you believe this is an error, please report it at: ${REPO_URL}/issues";;
   esac
 
-  case "$(uname -m)" in
+  case "$uname_m" in
     x86_64|amd64) arch="x64";;
     arm64|aarch64)
       if [ "$os" = "macos" ]; then
@@ -127,7 +144,13 @@ detect_platform() {
         arch="arm64"
       fi
       ;;
-    *)       error "Unsupported architecture: $(uname -m)";;
+    *)       error "Unsupported architecture: $uname_m on $uname_s
+
+Supported architectures:
+- x86_64/amd64 (Intel/AMD 64-bit)
+- arm64/aarch64 (ARM 64-bit)
+
+If you believe this is an error, please report it at: ${REPO_URL}/issues";;
   esac
 
   echo "$os"
@@ -138,16 +161,33 @@ command_exists() {
 }
 
 check_dependencies() {
+  local missing_deps=()
+
   if ! command_exists unzip; then
     warning "unzip not found, will try to use alternative methods for extraction"
   fi
 
   if ! command_exists git; then
-    error "git is required for git-vault to function"
+    missing_deps+=("git")
   fi
 
   if ! command_exists gpg; then
     warning "gpg not found, will be required for git-vault to function properly"
+  fi
+
+  # Check for download tools
+  if ! command_exists curl && ! command_exists wget; then
+    missing_deps+=("curl or wget")
+  fi
+
+  if [ ${#missing_deps[@]} -gt 0 ]; then
+    error "Missing required dependencies: ${missing_deps[*]}
+
+Please install the missing dependencies and try again:
+- On Ubuntu/Debian: sudo apt-get update && sudo apt-get install git curl
+- On CentOS/RHEL: sudo yum install git curl
+- On Alpine: apk add git curl
+- On macOS: Install git and curl via Homebrew or Xcode Command Line Tools"
   fi
 }
 
@@ -193,15 +233,58 @@ download_file() {
 get_latest_version() {
   local api_url="${REPO_API_URL}/releases/latest"
   local version
+  local http_code
+
+  info "Fetching latest version from GitHub API..."
 
   if command_exists curl; then
-    version=$(curl -sSL $api_url | grep '"tag_name":' | cut -d'"' -f4)
+    # Try to get HTTP response code first
+    http_code=$(curl -w '%{http_code}' -sSL "$api_url" -o /dev/null 2>/dev/null || echo "000")
+
+    if [ "$http_code" != "200" ]; then
+      error "Failed to fetch latest version from GitHub API (HTTP $http_code)
+
+Possible causes:
+- Network connectivity issues
+- GitHub API rate limiting (try again in a few minutes)
+- GitHub API is temporarily unavailable
+
+API URL: $api_url
+
+You can specify a version manually using: --version v0.1.0
+Or check available versions at: ${REPO_URL}/releases"
+    fi
+
+    version=$(curl -sSL "$api_url" 2>/dev/null | grep '"tag_name":' | cut -d'"' -f4)
   elif command_exists wget; then
-    version=$(wget -q -O - $api_url | grep '"tag_name":' | cut -d'"' -f4)
+    version=$(wget -q -O - "$api_url" 2>/dev/null | grep '"tag_name":' | cut -d'"' -f4)
+
+    if [ $? -ne 0 ]; then
+      error "Failed to fetch latest version from GitHub API using wget
+
+Possible causes:
+- Network connectivity issues
+- GitHub API rate limiting (try again in a few minutes)
+- GitHub API is temporarily unavailable
+
+API URL: $api_url
+
+You can specify a version manually using: --version v0.1.0
+Or check available versions at: ${REPO_URL}/releases"
+    fi
   fi
 
   if [ -z "$version" ]; then
-    error "Failed to determine latest version"
+    error "Failed to parse version from GitHub API response
+
+This could indicate:
+- Unexpected API response format
+- Network/parsing issues
+
+API URL: $api_url
+
+You can specify a version manually using: --version v0.1.0
+Or check available versions at: ${REPO_URL}/releases"
   fi
 
   echo "$version"
@@ -487,6 +570,7 @@ parse_args() {
   SPECIFIED_VERSION=""
   LOCAL_ZIP=""
   VERBOSE=false
+  DEBUG=false
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -510,6 +594,10 @@ parse_args() {
         VERBOSE=true
         shift
         ;;
+      --debug|-d)
+        DEBUG=true
+        shift
+        ;;
       *)
         warning "Unknown option: $1"
         shift
@@ -521,36 +609,52 @@ parse_args() {
 main() {
   parse_args "$@"
 
-  if [ "$VERBOSE" = "true" ]; then
+  if [ "$VERBOSE" = "true" ] || [ "$DEBUG" = "true" ]; then
     set -x
   fi
 
+  if [ "$DEBUG" = "true" ]; then
+    debug "Script started with arguments: $*"
+    debug "Platform detected: $(uname -s) $(uname -m)"
+    debug "Interactive mode: $INTERACTIVE"
+    debug "Available commands: curl=$(command_exists curl), wget=$(command_exists wget), git=$(command_exists git), gpg=$(command_exists gpg)"
+  fi
+
   if [ "$SHOULD_UNINSTALL" = "true" ]; then
+    debug "Uninstall mode selected"
     uninstall_git_vault
     exit 0
   fi
 
   info "Starting gv installation"
+  debug "About to check dependencies"
 
   check_dependencies
+  debug "Dependencies check completed"
 
   PLATFORM=$(detect_platform)
   info "Detected platform: $PLATFORM"
+  debug "Platform detection completed: $PLATFORM"
 
   VERSION="$SPECIFIED_VERSION"
   if [ -z "$VERSION" ] && [ -z "$LOCAL_ZIP" ]; then
+    debug "No version specified, fetching latest from GitHub"
     VERSION=$(get_latest_version)
     info "Latest version: $VERSION"
   elif [ -n "$SPECIFIED_VERSION" ]; then
     info "Installing specified version: $VERSION"
   fi
+  debug "Version determined: $VERSION"
 
   CURRENT_VERSION=$(check_installed_version)
+  debug "Current installed version check completed: ${CURRENT_VERSION:-none}"
+
   if [ -n "$CURRENT_VERSION" ] && [ -z "$LOCAL_ZIP" ]; then
     info "Found existing gv installation: $CURRENT_VERSION"
 
     compare_versions "$VERSION" "$CURRENT_VERSION"
     COMP_RESULT=$?
+    debug "Version comparison result: $COMP_RESULT"
 
     if [ $COMP_RESULT -eq 2 ]; then
       info "Current version is the same as target version"
@@ -590,6 +694,7 @@ main() {
     fi
   fi
 
+  debug "About to start download and install process"
   download_and_install "$PLATFORM" "$VERSION" "$LOCAL_ZIP"
 
   success "gv installation completed!"

@@ -152,6 +152,18 @@ Uses 1Password CLI (`op`) for password management instead of local `.pw` files.
 - Encrypt large binaries (images, videos, datasets), especially with Git LFS.
 - Need a simple, single-command solution for secure Git file storage.
 
+## Troubleshooting
+
+### Installation Issues
+
+If the installation script exits early or fails unexpectedly when using the curl command, you can enable debug mode to see detailed information about where the installation is failing:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/zackiles/git-vault/main/install.sh | bash -s -- --debug
+```
+
+This will provide verbose output showing each step of the installation process, including dependency checks, platform detection, and version fetching, which helps identify the exact point of failure.
+
 ## License
 
 MIT License - see the [LICENSE](LICENSE) file for details.
