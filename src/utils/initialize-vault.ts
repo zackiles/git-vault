@@ -13,13 +13,17 @@ import {
 import { isGpgAvailable } from '../services/gpg.ts'
 import { getVaults, isOpAvailable, isSignedIn } from '../services/op.ts'
 import terminal from './terminal.ts'
-import { createDefaultConfig, getGitVaultConfigPath, writeGitVaultConfig } from './config.ts'
+import {
+  createDefaultConfig,
+  getGitVaultConfigPath,
+  writeGitVaultConfig,
+} from './config.ts'
 import { DEFAULT_1PASSWORD_VAULT } from '../constants.ts'
 
 /**
  * Installs Git hooks for git-vault
  */
-async function installHooks(repoRoot: string, gitVaultDir: string): Promise<boolean> {
+async function installHooks(repoRoot: string): Promise<boolean> {
   try {
     const getHooksPathCmd = new Deno.Command('git', {
       args: ['config', 'core.hooksPath'],
@@ -35,7 +39,9 @@ async function installHooks(repoRoot: string, gitVaultDir: string): Promise<bool
 
     if (success && stdout.length > 0) {
       const customPath = new TextDecoder().decode(stdout).trim()
-      hooksDir = isAbsolute(customPath) ? customPath : join(repoRoot, customPath)
+      hooksDir = isAbsolute(customPath)
+        ? customPath
+        : join(repoRoot, customPath)
     }
 
     const hooksInfo = await Deno.stat(hooksDir).catch(() => null)
@@ -51,11 +57,10 @@ async function installHooks(repoRoot: string, gitVaultDir: string): Promise<bool
 
     for (const hook of hooks) {
       const hookPath = join(hooksDir, hook.name)
-      const scriptPath = join(gitVaultDir, `${hook.script}.js`)
       const hookContent = dedent`
         #!/usr/bin/env sh
         # git-vault hook marker
-        exec "${scriptPath}" "$@"
+        exec gv ${hook.script} --quiet
       `
       await Deno.writeTextFile(hookPath, hookContent)
 
@@ -68,7 +73,9 @@ async function installHooks(repoRoot: string, gitVaultDir: string): Promise<bool
             stderr: 'null',
           }).output()
         } catch {
-          console.warn(`Could not set executable permissions for ${hookPath} on Windows`)
+          console.warn(
+            `Could not set executable permissions for ${hookPath} on Windows`,
+          )
         }
       }
     }
@@ -96,7 +103,8 @@ export async function initializeVault(
 ): Promise<boolean> {
   let directoryCreated = false
   const gitVaultDir = join(workspacePath, '.vault')
-  const cleanupGitVaultDir = () => Deno.remove(gitVaultDir, { recursive: true }).catch(() => {})
+  const cleanupGitVaultDir = () =>
+    Deno.remove(gitVaultDir, { recursive: true }).catch(() => {})
 
   try {
     try {
@@ -167,7 +175,9 @@ export async function initializeVault(
 
         if (vaults.length === 0) {
           terminal.error('No 1Password vaults found')
-          console.log('Please create at least one vault in 1Password and try again.')
+          console.log(
+            'Please create at least one vault in 1Password and try again.',
+          )
           if (directoryCreated) await cleanupGitVaultDir()
           return false
         }
@@ -178,7 +188,10 @@ export async function initializeVault(
         ) || vaults[0] || DEFAULT_1PASSWORD_VAULT
 
         config.onePasswordVault = selection === 'Enter a custom vault name'
-          ? terminal.createPromptInput('Enter the vault name: ', DEFAULT_1PASSWORD_VAULT)
+          ? terminal.createPromptInput(
+            'Enter the vault name: ',
+            DEFAULT_1PASSWORD_VAULT,
+          )
           : selection
 
         terminal.success(`Using 1Password vault: '${config.onePasswordVault}'`)
@@ -186,7 +199,9 @@ export async function initializeVault(
         console.log('Using file-based password storage.')
       }
     } else {
-      console.log('1Password CLI not detected. Using default file-based password storage.')
+      console.log(
+        '1Password CLI not detected. Using default file-based password storage.',
+      )
     }
 
     console.log(`Storage mode ('${config.storageMode}') saved.`)
@@ -202,8 +217,12 @@ export async function initializeVault(
 
       console.log('Git LFS configured for gv archives.')
     } else {
-      console.log('Git LFS not detected. Large files will be stored directly in Git.')
-      console.log('For better performance with large files, consider installing Git LFS.')
+      console.log(
+        'Git LFS not detected. Large files will be stored directly in Git.',
+      )
+      console.log(
+        'For better performance with large files, consider installing Git LFS.',
+      )
     }
 
     await writeGitVaultConfig(workspacePath, config)
@@ -215,12 +234,14 @@ export async function initializeVault(
 
     console.log('Installing Git hooks...')
 
-    const hooks = await installHooks(workspacePath, gitVaultDir)
+    const hooks = await installHooks(workspacePath)
 
     if (hooks) {
       console.log('Git hooks installed successfully.')
     } else {
-      console.warn('Warning: Failed to install Git hooks. You may need to install them manually.')
+      console.warn(
+        'Warning: Failed to install Git hooks. You may need to install them manually.',
+      )
     }
 
     console.log('Staging gv files...')
@@ -251,7 +272,11 @@ export async function initializeVault(
     }
 
     console.log(
-      `\n${bold('Remember to commit the staged changes to complete the initialization.')}`,
+      `\n${
+        bold(
+          'Remember to commit the staged changes to complete the initialization.',
+        )
+      }`,
     )
 
     return true

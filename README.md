@@ -105,6 +105,22 @@ gv list
 
 Displays managed files/directories, status, and archive sizes.
 
+**Manually encrypt all managed files:**
+
+```bash
+gv encrypt [path/to/file]
+```
+
+This command is automatically called by git hooks before commits, but can be run manually to ensure all managed files are encrypted. If a specific file path is provided, only that file will be encrypted (if it's managed by git-vault).
+
+**Manually decrypt all managed files:**
+
+```bash
+gv decrypt [path/to/file]
+```
+
+This command is automatically called by git hooks after checkout/merge, but can be run manually to decrypt all managed files. If a specific file path is provided, only that file will be decrypted (if it's managed by git-vault).
+
 > [!IMPORTANT]
 > Your .gitignore will be automatically updated to ignore the password files and you're safe to commit everything else including `.vault/storage/` and `.vault/config.json`)
 

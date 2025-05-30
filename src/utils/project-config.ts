@@ -24,7 +24,9 @@ const PROJECT_CONFIG_FILES = [
 ] as const
 
 type ProjectConfigFile = typeof PROJECT_CONFIG_FILES[number]
-type TaskDefinition = Record<'add' | 'remove', string> & { list?: string }
+type TaskDefinition =
+  & Record<'add' | 'remove' | 'encrypt' | 'decrypt', string>
+  & { list?: string }
 
 const VAULT_TASK_LABELS = Object.values(VAULT_TASKS) as string[]
 
@@ -60,9 +62,17 @@ function getTaskDefinitions(configFileName: ProjectConfigFile): TaskDefinition {
     add: `${PATHS.BASE_NAME} add`,
     remove: `${PATHS.BASE_NAME} remove`,
     list: `${PATHS.BASE_NAME} list`,
+    encrypt: `${PATHS.BASE_NAME} encrypt`,
+    decrypt: `${PATHS.BASE_NAME} decrypt`,
   }
   return configFileName.startsWith('deno.')
-    ? { add: `${base.add} $@`, remove: `${base.remove} $@`, list: base.list }
+    ? {
+      add: `${base.add} $@`,
+      remove: `${base.remove} $@`,
+      list: base.list,
+      encrypt: base.encrypt,
+      decrypt: base.decrypt,
+    }
     : base
 }
 
@@ -77,14 +87,18 @@ async function addTasksToProjectConfig(
   try {
     if (configFileName === 'Makefile') {
       const content = await Deno.readTextFile(configPath)
-      const entries = [[MAKEFILE_TASKS.ADD, tasks.add], [
-        MAKEFILE_TASKS.REMOVE,
-        tasks.remove,
-      ], ...(tasks.list ? [[MAKEFILE_TASKS.LIST, tasks.list]] : [])]
+      const entries = [
+        [MAKEFILE_TASKS.ADD, tasks.add],
+        [MAKEFILE_TASKS.REMOVE, tasks.remove],
+        [MAKEFILE_TASKS.ENCRYPT, tasks.encrypt],
+        [MAKEFILE_TASKS.DECRYPT, tasks.decrypt],
+        ...(tasks.list ? [[MAKEFILE_TASKS.LIST, tasks.list]] : []),
+      ]
       const targets = entries.flatMap(([target, command]) => [
         `${target}:`,
         `\t${command}${
-          target !== MAKEFILE_TASKS.LIST
+          target !== MAKEFILE_TASKS.LIST && target !== MAKEFILE_TASKS.ENCRYPT &&
+            target !== MAKEFILE_TASKS.DECRYPT
             ? ' $(filter-out $@,$(MAKECMDGOALS))'
             : ''
         }`,
@@ -118,6 +132,14 @@ async function addTasksToProjectConfig(
         executor: NX_EXECUTOR,
         options: { command: tasks.remove },
       }
+      config.targets[VAULT_TASKS.ENCRYPT] = {
+        executor: NX_EXECUTOR,
+        options: { command: tasks.encrypt },
+      }
+      config.targets[VAULT_TASKS.DECRYPT] = {
+        executor: NX_EXECUTOR,
+        options: { command: tasks.decrypt },
+      }
       if (tasks.list) {
         config.targets[VAULT_TASKS.LIST] = {
           executor: NX_EXECUTOR,
@@ -139,6 +161,8 @@ async function addTasksToProjectConfig(
       })
       config.tasks.push(createTask(VAULT_TASKS.ADD, tasks.add))
       config.tasks.push(createTask(VAULT_TASKS.REMOVE, tasks.remove))
+      config.tasks.push(createTask(VAULT_TASKS.ENCRYPT, tasks.encrypt))
+      config.tasks.push(createTask(VAULT_TASKS.DECRYPT, tasks.decrypt))
       if (tasks.list) {
         config.tasks.push(createTask(VAULT_TASKS.LIST, tasks.list))
       }
@@ -162,7 +186,19 @@ async function addTasksToProjectConfig(
         VAULT_TASKS.LIST,
         tasks.list,
       )
-      return result1 && result2 && result3
+      const result4 = await updateJsonScript(
+        configPath,
+        section,
+        VAULT_TASKS.ENCRYPT,
+        tasks.encrypt,
+      )
+      const result5 = await updateJsonScript(
+        configPath,
+        section,
+        VAULT_TASKS.DECRYPT,
+        tasks.decrypt,
+      )
+      return result1 && result2 && result3 && result4 && result5
     }
 
     await Deno.writeTextFile(configPath, JSON.stringify(config, null, 2))
@@ -235,7 +271,19 @@ async function removeTasksFromProjectConfig(
         VAULT_TASKS.LIST,
         undefined,
       )
-      return result1 && result2 && result3
+      const result4 = await updateJsonScript(
+        configPath,
+        section,
+        VAULT_TASKS.ENCRYPT,
+        undefined,
+      )
+      const result5 = await updateJsonScript(
+        configPath,
+        section,
+        VAULT_TASKS.DECRYPT,
+        undefined,
+      )
+      return result1 && result2 && result3 && result4 && result5
     }
 
     await Deno.writeTextFile(configPath, JSON.stringify(config, null, 2))

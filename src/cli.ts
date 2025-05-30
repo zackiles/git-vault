@@ -9,13 +9,15 @@ import remove from './commands/remove.ts'
 import list from './commands/list.ts'
 import version from './commands/version.ts'
 import uninstall from './commands/uninstall.ts'
+import encrypt from './commands/encrypt.ts'
+import decrypt from './commands/decrypt.ts'
 import gracefulShutdown from './utils/graceful-shutdown.ts'
 import terminal from './utils/terminal.ts'
 import { COMMAND_DESCRIPTIONS } from './constants.ts'
 import type { CommandName, CommandRegistry } from './types.ts'
 import * as dev from './utils/dev.ts'
 
-Deno.env.set('GV_VERSION', '0.0.5')
+Deno.env.set('GV_VERSION', '0.0.6')
 
 // IMPORTANT: Production is the default, must be overridden in tests/development/integration tests
 if (!Deno.env.get('DENO_ENV')) {
@@ -35,7 +37,7 @@ const options = {
     u: 'uninstall',
   },
   string: ['workspace'],
-  boolean: ['help', 'version'],
+  boolean: ['help', 'version', 'quiet'],
   default: {
     workspace: Deno.cwd(),
   },
@@ -48,6 +50,8 @@ const handlers: CommandRegistry = {
   list,
   version,
   uninstall,
+  encrypt,
+  decrypt,
 }
 
 function printHelp() {
@@ -62,10 +66,13 @@ function printHelp() {
       list      ${COMMAND_DESCRIPTIONS.list}
       version   ${COMMAND_DESCRIPTIONS.version}
       uninstall ${COMMAND_DESCRIPTIONS.uninstall}
+      encrypt   ${COMMAND_DESCRIPTIONS.encrypt}
+      decrypt   ${COMMAND_DESCRIPTIONS.decrypt}
 
     ${bold('Global Options:')}
       --workspace, -w  Path to the Git repository (default: CWD)
                        All commands operate relative to this workspace
+      --quiet          Suppress output (useful for git hooks)
 
     ${bold('Examples:')}
       gv .env                     # Add a file
@@ -148,7 +155,7 @@ async function runCommand(args: string[]) {
     return printHelp()
   }
 
-  await handlers[cmd]({ workspace, item: rest[0] })
+  await handlers[cmd]({ workspace, item: rest[0], quiet: parsed.quiet })
 }
 
 if (import.meta.main) {

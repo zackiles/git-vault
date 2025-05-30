@@ -4,6 +4,8 @@ export const COMMAND_DESCRIPTIONS = {
   list: 'List all files and directories managed by gv',
   version: 'Show gv version',
   uninstall: 'Uninstall gv from your system',
+  encrypt: 'Encrypt all managed files',
+  decrypt: 'Decrypt all managed files',
 } as const
 
 export const DEFAULT_CONFIG_VERSION = 1
@@ -14,12 +16,16 @@ export const VAULT_TASKS = {
   ADD: 'vault:add',
   REMOVE: 'vault:remove',
   LIST: 'vault:list',
+  ENCRYPT: 'vault:encrypt',
+  DECRYPT: 'vault:decrypt',
 } as const
 
 export const MAKEFILE_TASKS = {
   ADD: 'vault-add',
   REMOVE: 'vault-remove',
   LIST: 'vault-list',
+  ENCRYPT: 'vault-encrypt',
+  DECRYPT: 'vault-decrypt',
 } as const
 
 export const MAKEFILE_SECTION_MARKER = '# Git-Vault tasks'

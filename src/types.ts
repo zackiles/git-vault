@@ -1,5 +1,12 @@
 // A single type containing all command names
-type CommandName = 'add' | 'remove' | 'list' | 'version' | 'uninstall'
+type CommandName =
+  | 'add'
+  | 'remove'
+  | 'list'
+  | 'version'
+  | 'uninstall'
+  | 'encrypt'
+  | 'decrypt'
 
 // Command arguments with workspace always defined
 type CommandArgs = {
