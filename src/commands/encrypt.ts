@@ -94,7 +94,13 @@ async function run(args: CommandArgs): Promise<void> {
         // Get the password
         let password: string | null = null
 
-        if (config.storageMode === '1password') {
+        if (args.password) {
+          // Use provided password
+          password = args.password
+          if (!args.quiet) {
+            terminal.info('Using provided password', '')
+          }
+        } else if (config.storageMode === '1password') {
           if (!await isOpAvailable()) {
             terminal.error('1Password CLI is not available')
             failedCount++

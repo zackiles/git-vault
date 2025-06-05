@@ -12,6 +12,9 @@ type CommandName =
 type CommandArgs = {
   workspace: string
   item?: string
+  password?: string
+  write?: boolean
+  quiet?: boolean
   [key: string]: unknown
 }
 

@@ -4,10 +4,20 @@ import { bold } from '@std/fmt/colors'
 import { extractArchive } from '../utils/compression.ts'
 import { getProjectName, getRepositoryRoot } from '../services/git.ts'
 import { decryptFile } from '../services/gpg.ts'
-import { getPassword, isOpAvailable, isSignedIn } from '../services/op.ts'
+import {
+  createPasswordItem,
+  getPassword,
+  isOpAvailable,
+  isSignedIn,
+} from '../services/op.ts'
 import terminal from '../utils/terminal.ts'
-import type { CommandArgs, CommandHandler, ManagedPath } from '../types.ts'
-import { readGitVaultConfig } from '../utils/config.ts'
+import type {
+  CommandArgs,
+  CommandHandler,
+  GitVaultConfig,
+  ManagedPath,
+} from '../types.ts'
+import { readGitVaultConfig, writeGitVaultConfig } from '../utils/config.ts'
 import { DEFAULT_1PASSWORD_VAULT } from '../constants.ts'
 import { PATHS } from '../paths.ts'
 
@@ -108,8 +118,16 @@ async function run(args: CommandArgs): Promise<void> {
       try {
         // Get the password
         let password: string | null = null
+        let passwordWasProvided = false
 
-        if (config.storageMode === '1password') {
+        if (args.password) {
+          // Use provided password
+          password = args.password
+          passwordWasProvided = true
+          if (!args.quiet) {
+            terminal.info('Using provided password', '')
+          }
+        } else if (config.storageMode === '1password') {
           if (!await isOpAvailable()) {
             terminal.error('1Password CLI is not available')
             failedCount++
@@ -216,6 +234,18 @@ async function run(args: CommandArgs): Promise<void> {
           if (!args.quiet) {
             terminal.info('Decrypted:', managedPath.path)
           }
+
+          // Handle --write functionality: save provided password after successful decryption
+          if (passwordWasProvided && args.write) {
+            await handlePasswordWrite(
+              password,
+              managedPath,
+              config,
+              repoRoot,
+              gitVaultDir,
+              !args.quiet,
+            )
+          }
         } finally {
           // Clean up temp directory
           await Deno.remove(tempDir, { recursive: true })
@@ -239,6 +269,108 @@ async function run(args: CommandArgs): Promise<void> {
     }
   } catch (error) {
     terminal.error('Decryption failed', error)
+  }
+}
+
+/**
+ * Handles writing a password to storage after successful decryption
+ * Used when --write flag is provided with --password
+ */
+async function handlePasswordWrite(
+  password: string,
+  managedPath: ManagedPath,
+  config: GitVaultConfig,
+  repoRoot: string,
+  gitVaultDir: string,
+  showMessages: boolean,
+): Promise<void> {
+  try {
+    if (config.storageMode === '1password') {
+      if (!await isOpAvailable()) {
+        if (showMessages) terminal.error('1Password CLI is not available')
+        return
+      }
+
+      if (!await isSignedIn()) {
+        if (showMessages) terminal.error('Not signed in to 1Password')
+        return
+      }
+
+      const vaultName = config.onePasswordVault || DEFAULT_1PASSWORD_VAULT
+      const projectName = await getProjectName(repoRoot)
+      const itemName = `${PATHS.BASE_NAME}-${projectName}-${managedPath.hash}`
+
+      // Ask user if they want to overwrite existing 1Password entry
+      if (showMessages) {
+        const shouldOverwrite = terminal.createConfirm(
+          `Overwrite existing 1Password entry for ${managedPath.path}?`,
+          true,
+        )
+        if (!shouldOverwrite) {
+          return
+        }
+      }
+
+      const success = await createPasswordItem(
+        itemName,
+        vaultName,
+        password,
+        {
+          path: managedPath.path,
+          status: 'active',
+        },
+      )
+
+      if (success && showMessages) {
+        terminal.info('Password saved to 1Password', itemName)
+      } else if (!success && showMessages) {
+        terminal.error('Failed to save password to 1Password')
+      }
+    } else {
+      // File-based storage
+      const passwordFile = join(
+        gitVaultDir,
+        `${PATHS.BASE_NAME}-${managedPath.hash}.pw`,
+      )
+
+      // Ask user if they want to overwrite existing password file
+      if (showMessages && await exists(passwordFile)) {
+        const shouldOverwrite = terminal.createConfirm(
+          `Overwrite existing password file for ${managedPath.path}?`,
+          true,
+        )
+        if (!shouldOverwrite) {
+          return
+        }
+      }
+
+      await Deno.writeTextFile(passwordFile, password)
+
+      if (Deno.build.os !== 'windows') {
+        await Deno.chmod(passwordFile, 0o600)
+      } else {
+        try {
+          await new Deno.Command('attrib', {
+            args: ['+r', passwordFile],
+            stderr: 'null',
+          }).output()
+        } catch {
+          if (showMessages) {
+            terminal.warn(
+              `Could not set secure permissions for ${passwordFile} on Windows`,
+            )
+          }
+        }
+      }
+
+      if (showMessages) {
+        terminal.info('Password saved to file', passwordFile)
+      }
+    }
+  } catch (error) {
+    if (showMessages) {
+      terminal.error('Failed to write password:', error)
+    }
   }
 }
 

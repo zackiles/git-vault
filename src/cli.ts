@@ -35,9 +35,10 @@ const options = {
     h: 'help',
     w: 'workspace',
     u: 'uninstall',
+    p: 'password',
   },
-  string: ['workspace'],
-  boolean: ['help', 'version', 'quiet'],
+  string: ['workspace', 'password'],
+  boolean: ['help', 'version', 'quiet', 'write'],
   default: {
     workspace: Deno.cwd(),
   },
@@ -73,12 +74,17 @@ function printHelp() {
       --workspace, -w  Path to the Git repository (default: CWD)
                        All commands operate relative to this workspace
       --quiet          Suppress output (useful for git hooks)
+      --password, -p   Provide password directly (skips interactive prompt)
+      --write          Write the provided password to storage after successful operation
+                       (only valid with --password)
 
     ${bold('Examples:')}
       gv .env                     # Add a file
       gv data/                    # Add a folder
       gv remove .env              # Remove a file (or a folder)
       gv list                     # List items in the vault
+      gv add .env --password mypass --write  # Add file with password and save it
+      gv decrypt .env --password mypass      # Decrypt with provided password
 
     Run "gv ${cyan('<command>')} ${
     yellow('--help')
@@ -143,7 +149,13 @@ async function runCommand(args: string[]) {
     const shouldAddFile = await handleConflict(cmd)
     if (shouldAddFile) {
       rest.unshift(cmd)
-      return handlers.add({ workspace, item: rest[0] })
+      return handlers.add({
+        workspace,
+        item: rest[0],
+        password: parsed.password as string | undefined,
+        write: parsed.write as boolean | undefined,
+        quiet: parsed.quiet as boolean | undefined,
+      })
     }
   } else if (cmd && !cmd.startsWith('-')) {
     rest.unshift(cmd)
@@ -155,7 +167,13 @@ async function runCommand(args: string[]) {
     return printHelp()
   }
 
-  await handlers[cmd]({ workspace, item: rest[0], quiet: parsed.quiet })
+  await handlers[cmd]({
+    workspace,
+    item: rest[0],
+    password: parsed.password as string | undefined,
+    write: parsed.write as boolean | undefined,
+    quiet: parsed.quiet as boolean | undefined,
+  })
 }
 
 if (import.meta.main) {

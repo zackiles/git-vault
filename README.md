@@ -121,6 +121,23 @@ gv decrypt [path/to/file]
 
 This command is automatically called by git hooks after checkout/merge, but can be run manually to decrypt all managed files. If a specific file path is provided, only that file will be decrypted (if it's managed by git-vault).
 
+**Password management options:**
+
+The CLI supports providing passwords directly for CI/CD and automation scenarios:
+
+```bash
+# Use a password from command line (skips interactive prompt)
+gv add .env --password mypassword
+
+# Decrypt with a specific password and save it to storage
+gv decrypt --password mypassword --write
+
+# Encrypt with a different password (overrides stored password)  
+gv encrypt --password newpassword
+```
+
+The `--write` flag can be used with `--password` to save the provided password to storage after successful decryption. This is useful for password recovery scenarios where you know the correct password but the stored password file is missing or corrupted.
+
 > [!IMPORTANT]
 > Your .gitignore will be automatically updated to ignore the password files and you're safe to commit everything else including `.vault/storage/` and `.vault/config.json`)
 

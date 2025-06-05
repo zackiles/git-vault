@@ -13,13 +13,20 @@ import {
   updateGitignore,
 } from '../services/git.ts'
 import { encryptFile } from '../services/gpg.ts'
-import { createPasswordItem, isOpAvailable, isSignedIn } from '../services/op.ts'
+import {
+  createPasswordItem,
+  isOpAvailable,
+  isSignedIn,
+} from '../services/op.ts'
 import terminal from '../utils/terminal.ts'
 import type { CommandArgs, CommandHandler } from '../types.ts'
 import { dedent } from '@qnighy/dedent'
 import { readGitVaultConfig, writeGitVaultConfig } from '../utils/config.ts'
 import { DEFAULT_1PASSWORD_VAULT } from '../constants.ts'
-import { initializeVault, isVaultInitialized } from '../utils/initialize-vault.ts'
+import {
+  initializeVault,
+  isVaultInitialized,
+} from '../utils/initialize-vault.ts'
 import { PATHS } from '../paths.ts'
 import {
   addTasksToProjectConfig,
@@ -38,7 +45,9 @@ async function run(args: CommandArgs): Promise<void> {
   }
 
   // Handle both absolute and relative paths correctly
-  const pathToProtected = isAbsolute(args.item) ? args.item : join(args.workspace, args.item)
+  const pathToProtected = isAbsolute(args.item)
+    ? args.item
+    : join(args.workspace, args.item)
 
   try {
     const repoRoot = await getRepositoryRoot(args.workspace as string)
@@ -59,7 +68,9 @@ async function run(args: CommandArgs): Promise<void> {
       }
       const initialized = await initializeVault(repoRoot, false)
       if (!initialized) {
-        terminal.error('Failed to initialize the vault. Please try again or check for errors.')
+        terminal.error(
+          'Failed to initialize the vault. Please try again or check for errors.',
+        )
         return
       }
       terminal.success('Vault initialized successfully.')
@@ -73,7 +84,9 @@ async function run(args: CommandArgs): Promise<void> {
 
     const config = await readGitVaultConfig(repoRoot)
     if (!config) {
-      terminal.error('Vault configuration not found after initialization. This should not happen.')
+      terminal.error(
+        'Vault configuration not found after initialization. This should not happen.',
+      )
       return
     }
 
@@ -106,7 +119,9 @@ async function run(args: CommandArgs): Promise<void> {
         !realPathToProtected.startsWith(`${realRepoRoot}/`) &&
         realPathToProtected !== realRepoRoot
       ) {
-        terminal.error(`Path '${pathToProtected}' is not inside the repository '${repoRoot}'`)
+        terminal.error(
+          `Path '${pathToProtected}' is not inside the repository '${repoRoot}'`,
+        )
         return
       }
     }
@@ -135,7 +150,9 @@ async function run(args: CommandArgs): Promise<void> {
 
     const pathIndex = config.managedPaths.findIndex((p) => p.hash === pathHash)
     if (pathIndex !== -1) {
-      terminal.error(`Path already managed: '${relativePath}' (hash: ${pathHash})`)
+      terminal.error(
+        `Path already managed: '${relativePath}' (hash: ${pathHash})`,
+      )
       return
     }
 
@@ -143,31 +160,37 @@ async function run(args: CommandArgs): Promise<void> {
     let password = ''
     let confirmPassword = ''
 
-    // Password input loop
-    while (true) {
-      password = terminal.createPromptPassword('Enter password: ')
+    // Use provided password or prompt for one
+    if (args.password !== undefined) {
+      password = args.password
+      terminal.info('Using provided password', '')
+    } else {
+      // Password input loop
+      while (true) {
+        password = terminal.createPromptPassword('Enter password: ')
 
-      // Check for empty password
-      if (!password) {
-        terminal.warn('Password cannot be empty. Please try again.')
-        continue
+        // Check for empty password
+        if (!password) {
+          terminal.warn('Password cannot be empty. Please try again.')
+          continue
+        }
+
+        // Check password length
+        if (password.length < 8) {
+          terminal.warn('Password is less than 8 characters long')
+        }
+
+        confirmPassword = terminal.createPromptPassword('Confirm password: ')
+
+        // Check if passwords match
+        if (password !== confirmPassword) {
+          terminal.warn('Passwords do not match. Please try again.')
+          continue
+        }
+
+        // If we've made it here, passwords are valid
+        break
       }
-
-      // Check password length
-      if (password.length < 8) {
-        terminal.warn('Password is less than 8 characters long')
-      }
-
-      confirmPassword = terminal.createPromptPassword('Confirm password: ')
-
-      // Check if passwords match
-      if (password !== confirmPassword) {
-        terminal.warn('Passwords do not match. Please try again.')
-        continue
-      }
-
-      // If we've made it here, passwords are valid
-      break
     }
 
     const archiveName = relativePath.replaceAll('/', '-')
@@ -176,21 +199,31 @@ async function run(args: CommandArgs): Promise<void> {
     const tempDir = await Deno.makeTempDir()
     try {
       const tempArchivePath = join(tempDir, 'archive.tar.gz')
-      const archiveSuccess = await createArchive(pathToProtected, tempArchivePath)
+      const archiveSuccess = await createArchive(
+        pathToProtected,
+        tempArchivePath,
+      )
 
       if (!archiveSuccess) {
         terminal.error('Failed to create archive')
         return
       }
 
-      const encryptSuccess = await encryptFile(tempArchivePath, archivePath, password)
+      const encryptSuccess = await encryptFile(
+        tempArchivePath,
+        archivePath,
+        password,
+      )
 
       if (!encryptSuccess) {
         terminal.error('Failed to encrypt archive')
         return
       }
 
-      const passwordFile = join(gitVaultDir, `${PATHS.BASE_NAME}-${pathHash}.pw`)
+      const passwordFile = join(
+        gitVaultDir,
+        `${PATHS.BASE_NAME}-${pathHash}.pw`,
+      )
 
       if (config.storageMode === '1password') {
         if (!await isOpAvailable()) {
@@ -225,8 +258,14 @@ async function run(args: CommandArgs): Promise<void> {
           return
         }
 
-        await Deno.writeTextFile(join(gitVaultDir, `${PATHS.BASE_NAME}-${pathHash}.pw.1p`), '')
-        terminal.info('Password stored in 1Password.', `Marker file created: ${passwordFile}.1p`)
+        await Deno.writeTextFile(
+          join(gitVaultDir, `${PATHS.BASE_NAME}-${pathHash}.pw.1p`),
+          '',
+        )
+        terminal.info(
+          'Password stored in 1Password.',
+          `Marker file created: ${passwordFile}.1p`,
+        )
       } else {
         await Deno.writeTextFile(passwordFile, password)
         if (Deno.build.os !== 'windows') {
@@ -238,7 +277,9 @@ async function run(args: CommandArgs): Promise<void> {
               stderr: 'null',
             }).output()
           } catch {
-            terminal.warn(`Could not set secure permissions for ${passwordFile} on Windows`)
+            terminal.warn(
+              `Could not set secure permissions for ${passwordFile} on Windows`,
+            )
           }
         }
         terminal.info('Password saved in:', passwordFile)
@@ -256,9 +297,14 @@ async function run(args: CommandArgs): Promise<void> {
         if (await isLfsAvailable()) {
           terminal.status('Configuring Git LFS for this archive...')
           await initLfs(repoRoot)
-          await configureLfs(repoRoot, `${relative(repoRoot, storageDir)}/*.tar.gz.gpg`)
+          await configureLfs(
+            repoRoot,
+            `${relative(repoRoot, storageDir)}/*.tar.gz.gpg`,
+          )
         } else {
-          terminal.warn('Git LFS not available. Large archive will be stored directly in Git.')
+          terminal.warn(
+            'Git LFS not available. Large archive will be stored directly in Git.',
+          )
         }
       }
 
@@ -287,7 +333,10 @@ async function run(args: CommandArgs): Promise<void> {
 
       if (config.storageMode === '1password') {
         filesToStage.push(
-          relative(repoRoot, join(gitVaultDir, `${PATHS.BASE_NAME}-${pathHash}.pw.1p`)),
+          relative(
+            repoRoot,
+            join(gitVaultDir, `${PATHS.BASE_NAME}-${pathHash}.pw.1p`),
+          ),
         )
       }
 
@@ -302,7 +351,9 @@ async function run(args: CommandArgs): Promise<void> {
       if (archiveSize >= config.lfsThresholdMB && await isLfsAvailable()) {
         terminal.info(
           'Git LFS enabled:',
-          `archive size ${archiveSize.toFixed(2)}MB (threshold: ${config.lfsThresholdMB}MB)`,
+          `archive size ${
+            archiveSize.toFixed(2)
+          }MB (threshold: ${config.lfsThresholdMB}MB)`,
         )
       }
 
@@ -316,11 +367,17 @@ async function run(args: CommandArgs): Promise<void> {
 
         if (shouldAddTasks) {
           const tasks = getTaskDefinitions(projectConfigFile)
-          const success = await addTasksToProjectConfig(repoRoot, projectConfigFile, tasks)
+          const success = await addTasksToProjectConfig(
+            repoRoot,
+            projectConfigFile,
+            tasks,
+          )
 
           if (success) {
             // Update the managed path entry to track which config file was modified
-            const pathEntry = config.managedPaths.find((p) => p.hash === pathHash)
+            const pathEntry = config.managedPaths.find((p) =>
+              p.hash === pathHash
+            )
             if (pathEntry) {
               if (!pathEntry.addedTasks) {
                 pathEntry.addedTasks = []

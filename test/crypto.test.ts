@@ -7,6 +7,7 @@ import encrypt from '../src/commands/encrypt.ts'
 import decrypt from '../src/commands/decrypt.ts'
 import { setupTestEnvironment } from './mocks/test-utils.ts'
 import { readGitVaultConfig } from '../src/utils/config.ts'
+import terminal from '../src/utils/terminal.ts'
 
 /**
  * Creates a temporary Git repository for testing
@@ -385,6 +386,230 @@ Deno.test({
 
       // Commands should complete without throwing
       assert(true, 'Commands completed without throwing')
+    } finally {
+      testEnv.restore()
+      await cleanup()
+    }
+  },
+})
+
+Deno.test({
+  name: 'encrypt: with --password flag uses provided password',
+  async fn() {
+    const testEnv = setupTestEnvironment({
+      mockCommands: false,
+      mockTerminal: true,
+    })
+    const { path: repoPath, cleanup } = await createTempGitRepo()
+
+    try {
+      // Initialize vault
+      await initializeVault(repoPath, true)
+
+      // Create test file
+      const testFile = join(repoPath, 'encrypt-password-test.txt')
+      const testContent = 'Test content for encrypt password flag'
+      await Deno.writeTextFile(testFile, testContent)
+
+      // Add file with a known password
+      await add({
+        item: testFile,
+        workspace: repoPath,
+        password: 'original-password',
+      })
+
+      // Modify file content
+      const modifiedContent = 'Modified content'
+      await Deno.writeTextFile(testFile, modifiedContent)
+
+      // Encrypt with different password - should work and use the provided password
+      await encrypt({
+        workspace: repoPath,
+        password: 'override-password',
+        quiet: true,
+      })
+
+      // Delete original file
+      await Deno.remove(testFile)
+
+      // Try to decrypt with the original password - should fail
+      await decrypt({
+        workspace: repoPath,
+        password: 'original-password',
+        quiet: true,
+      })
+
+      // File should not be restored with wrong password
+      assert(
+        !await exists(testFile),
+        'File should not be restored with wrong password',
+      )
+
+      // Decrypt with the override password - should work
+      await decrypt({
+        workspace: repoPath,
+        password: 'override-password',
+        quiet: true,
+      })
+
+      // File should be restored
+      assert(
+        await exists(testFile),
+        'File should be restored with correct password',
+      )
+      assertEquals(
+        await Deno.readTextFile(testFile),
+        modifiedContent,
+        'Content should match the modified version',
+      )
+    } finally {
+      testEnv.restore()
+      await cleanup()
+    }
+  },
+})
+
+Deno.test({
+  name: 'decrypt: with --password and --write flags saves password',
+  async fn() {
+    const testEnv = setupTestEnvironment({
+      mockCommands: false,
+      mockTerminal: true,
+    })
+    const { path: repoPath, cleanup } = await createTempGitRepo()
+
+    try {
+      // Initialize vault
+      await initializeVault(repoPath, true)
+
+      // Create test file
+      const testFile = join(repoPath, 'decrypt-write-test.txt')
+      const testContent = 'Test content for decrypt write flag'
+      await Deno.writeTextFile(testFile, testContent)
+
+      // Add file with a password
+      await add({
+        item: testFile,
+        workspace: repoPath,
+        password: 'original-password',
+      })
+
+      // Get the managed path to find the hash
+      const config = await readGitVaultConfig(repoPath)
+      assert(config, 'Config should exist')
+      const managedPath = config.managedPaths.find((p) =>
+        p.path === 'decrypt-write-test.txt'
+      )
+      assert(managedPath, 'Managed path should exist')
+
+      // Delete the password file to simulate lost password
+      const passwordFile = join(repoPath, '.vault', `gv-${managedPath.hash}.pw`)
+      await Deno.remove(passwordFile)
+
+      // Delete original file
+      await Deno.remove(testFile)
+
+      // Mock user confirmation for overwriting password
+      let confirmCalled = false
+      const originalConfirm = terminal.createConfirm
+      terminal.createConfirm = (message: string, defaultValue = false) => {
+        if (message.includes('Overwrite existing password file')) {
+          confirmCalled = true
+          return true
+        }
+        return defaultValue
+      }
+
+      // Decrypt with password and write flag - should restore file and save password
+      await decrypt({
+        workspace: repoPath,
+        password: 'original-password',
+        write: true,
+        quiet: false, // We want to see the confirmation prompt
+      })
+
+      // File should be restored
+      assert(await exists(testFile), 'File should be restored')
+      assertEquals(
+        await Deno.readTextFile(testFile),
+        testContent,
+        'Content should match original',
+      )
+
+      // Password file should be recreated
+      assert(await exists(passwordFile), 'Password file should be recreated')
+      const savedPassword = (await Deno.readTextFile(passwordFile)).trim()
+      assertEquals(
+        savedPassword,
+        'original-password',
+        'Saved password should match provided password',
+      )
+
+      // Confirm prompt should have been called since we're not in quiet mode
+      // (Note: this might not be called if the file didn't exist originally)
+    } finally {
+      testEnv.restore()
+      await cleanup()
+    }
+  },
+})
+
+Deno.test({
+  name: 'decrypt: --write flag without --password does nothing',
+  async fn() {
+    const testEnv = setupTestEnvironment({
+      mockCommands: false,
+      mockTerminal: true,
+    })
+    const { path: repoPath, cleanup } = await createTempGitRepo()
+
+    try {
+      // Initialize vault
+      await initializeVault(repoPath, true)
+
+      // Create test file
+      const testFile = join(repoPath, 'write-without-password-test.txt')
+      const testContent = 'Test content'
+      await Deno.writeTextFile(testFile, testContent)
+
+      // Add file with password
+      await add({
+        item: testFile,
+        workspace: repoPath,
+        password: 'test-password',
+      })
+
+      // Get original password file content
+      const config = await readGitVaultConfig(repoPath)
+      assert(config, 'Config should exist')
+      const managedPath = config.managedPaths.find((p) =>
+        p.path === 'write-without-password-test.txt'
+      )
+      assert(managedPath, 'Managed path should exist')
+
+      const passwordFile = join(repoPath, '.vault', `gv-${managedPath.hash}.pw`)
+      const originalPassword = await Deno.readTextFile(passwordFile)
+
+      // Delete original file
+      await Deno.remove(testFile)
+
+      // Decrypt with --write but no --password - should use stored password and not modify it
+      await decrypt({
+        workspace: repoPath,
+        write: true,
+        quiet: true,
+      })
+
+      // File should be restored
+      assert(await exists(testFile), 'File should be restored')
+
+      // Password file should be unchanged
+      const currentPassword = await Deno.readTextFile(passwordFile)
+      assertEquals(
+        currentPassword,
+        originalPassword,
+        'Password file should be unchanged',
+      )
     } finally {
       testEnv.restore()
       await cleanup()

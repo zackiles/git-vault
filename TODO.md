@@ -4,61 +4,19 @@
 
 Before marking a TODO done, run all tests. If they pass, mark it and the implementation plans as done. TODOs require an implementation plat and checklist in `docs/{todo name}-checklist.md`.
 
-### 1 ) Integrate 1Password for Passwords
-
-- **Objective**: Provide a way other than file-based passwords by allowing a seamless 1Password CLI integration.
-- `install.sh` asks if they want to use 1Password or regular file. (if the CLI is detected) otherwise it defaults to regular files.
-- All other logic in scripts stays the same except they know if they're using file or 1Password and encrypt/decrypt using a password or key stored on 1Password and managed through the 1Password CLI.
-- Multiple passwords can be created for multiple files in the same project.
-- The pattern for how to store the password or key IN 1Password should be idiomatic, intuitive, and seamless so that the user doesn't need to do anything and the password entries don't clutter or collide with their workspace.
-- `remove.sh` should remove the password from 1Password in a way similar to how file-based does, where it "marks" it removed instead of fully deleting it in case a user makes a mistake (we don't want them losing an unrecoverable decryption key)
-- Update all and tests/docs to reflect the new design. Ensure we mock 1Password's CLI interactions as best we can and doing so ONLY after doing deep research on their documentation and understanding of how it works cross-platform.
-
-### 2 ) Support Symmetric Keys
+### 1 ) Support Symmetric Keys
 
 Investigate supporting Symmetric Keys for Git-Vault. Borrow inspiration from the open source project [git-crypt]([git-crypt](https://github.com/AGWA/git-crypt)) by reviewing its documentation and code. git-crypt currently supports Symmetric Keys. Generate a TODO that documents the objective and what is needed to get feature parity with git-crypt in its usage of Symmetric Keys for encrypting and decrypting files. This TODO is to create another TODO.
+
+### 2 ) Field Encryption For JSON and YAML
+
+If the `add` command detects a JSON or YAML file it will prompt a user to ask if they want to encrypt just the values of all fields in the file when storing it in the vault, or do a full file encryption.
 
 ### 3 ) Field Encryption For JSON and YAML
 
 If the `add` command detects a JSON or YAML file it will prompt a user to ask if they want to encrypt just the values of all fields in the file when storing it in the vault, or do a full file encryption.
 
-### 4 ) Put`.pw` files in the `.vault` folder
-
-This will tidy up the end-users project by not cluttering the root of their repository with .pw files
-
-### 6 ) Project Helpers
-
-During the `add` command, check if user has a project config file with tasks in it at the project root, and if so, ask them if they'd like us to optionally add tasks for `vault:add` and `vault:remove`. This will greatly improve developer experience by providing a more familiar way for them to interact with git-vault in their projects.
-
-- NOTE: also cleanup these tasks on the `remove` command.
-- NOTE: not all packages may support the syntax like `vault:add` with the semi-colon, that's OK. For javascript based configs stick with the lowercase semi-colon, in other languages do what is most typical.
-
-Prioritized list to implement:
-
-| Filename                   | Ecosystem                 | Typical Usage Command               | Popularity (approximate rank)           |
-| -------------------------- | ------------------------- | ----------------------------------- | --------------------------------------- |
-| `package.json`             | JavaScript / Node.js      | `npm run`, `yarn run`, `pnpm run`   | ★★★★★ (ubiquitous in JS projects)       |
-| `Makefile`                 | General (C/C++, Go, etc.) | `make`                              | ★★★★☆ (common in OSS, cross-language)   |
-| `Cargo.toml`               | Rust                      | `cargo run`, `cargo build`, `cargo` | ★★★★☆ (ubiquitous in Rust projects)     |
-| `build.gradle` / `*.kts`   | Java / Kotlin             | `gradle`, `./gradlew`               | ★★★★☆ (dominant in JVM projects)        |
-| `pyproject.toml`           | Python                    | `poetry run`, `hatch run`           | ★★★☆☆ (rising, not universal yet)       |
-| `build.sbt`                | Scala                     | `sbt`                               | ★★★☆☆ (standard for Scala)              |
-| `mix.exs`                  | Elixir                    | `mix`                               | ★★★☆☆ (universal in Elixir projects)    |
-| `Rakefile`                 | Ruby                      | `rake`                              | ★★★☆☆ (seen in legacy and gems)         |
-| `Justfile`                 | Rust, general             | `just`                              | ★★☆☆☆ (popular in modern OSS Rust)      |
-| `deno.json` / `deno.jsonc` | Deno                      | `deno task`                         | ★★☆☆☆ (limited to Deno community)       |
-| `Taskfile.yml`             | Go, general               | `task`                              | ★★☆☆☆ (niche but growing)               |
-| `noxfile.py`               | Python                    | `nox`                               | ★★☆☆☆ (used in some test workflows)     |
-| `fabfile.py`               | Python                    | `fab`                               | ★☆☆☆☆ (mostly legacy)                   |
-| `Snakefile`                | Python (Snakemake)        | `snakemake`                         | ★☆☆☆☆ (popular in data science)         |
-| `invoke.yaml`              | Python (Invoke)           | `invoke`                            | ★☆☆☆☆ (niche usage)                     |
-| `moon.yml`                 | Moonrepo (Monorepo)       | `moon run`                          | ★☆☆☆☆ (modern monorepo setups)          |
-| `turbo.json`               | Turborepo                 | `turbo run`                         | ★☆☆☆☆ (rising in frontend monorepos)    |
-| `nx.json`                  | NX                        | `nx run`                            | ★☆☆☆☆ (used in Angular/React monorepos) |
-
-Sorted by **observed popularity in GitHub OSS projects**, focused on repositories with developer-invoked task configs.
-
-### 7 ) CI/CD Workflow Integration
+### 4 ) CI/CD Workflow Integration
 
 - **Objective**: Provide automated CI/CD workflow templates for unsealing vaulted items in GitHub Actions.
 - Create workflow templates that users can install to automatically unseal vaulted items in CI
@@ -75,13 +33,21 @@ Sorted by **observed popularity in GitHub OSS projects**, focused on repositorie
 - Add tests that verify the workflow templates work in CI environment
 - Consider adding a command like `gv workflow install` that helps users set up the CI integration
 
-### 8. Add/Remove globs
+### 5. Add/Remove globs
 
 Add and remove command should accept glob patterns. config.json should handle mappings from archive back to paths.
 
-### 9. Rename config.json to vault.json
+### 6. Passing Passwords as Flags / ENV
 
-More intentional, less chance to get caught in a gitignore
+To assist in CI usage (NOTE: See TODO `#4 CI/CD Workflow Integration`) we should allow decryption of repo assets using only a flag and environment variable instead of a pwd file.
+
+### 7. Recovery Modes
+
+It's not clear exactly what happens to the state (in vault.json, password files, 1password password records) if a user destroys or loses any of them. Investigate the simplest way this could be provided to our users and introduce a new CLI command that handles and implements that experience for them. Keep it simple and leverage the existing modules to help implement most of this feature in the command file itself rather than create new libraries or utils.
+
+### 8 ) Field-level Encryption (Like Mozilla SOPS)
+
+A full RFC describing the implementation can be found in `docs/rfc-field-level-encryption.md`. The objective would be to implement this in `src/feild-encryption/` as a series of modules that the add/encrypt and decrypt commands could use to optionally offer to a user field-level encryption when only a single-file that is a supported format for field-level encryption is provided to the encrypt/add command (which the CLI will detect). This RFC does NOT concern itself with integration into this codebase, and only describes the general code needed. You will have to determine the full implementation and integration into this codebase, such as managing state for this in vault.json and storing keys in the repo for symmetric. Also ensure extending it later for potential Future Considerations mentioned in the RFC.
 
 ## Completed TODOs
 
@@ -94,6 +60,15 @@ Once TODOs are fully implemented, tested, and documented, move them here for fut
 - Code comments and methods use 'init' instead of 'install'
 - Documentation has been updated to reflect this
 - The only time 'install' is used is when it comes to specific "install" commands of third parties or terminal commands for things that AREN'T git-vault.
+
+### Multiple Ways To Read/Write A Password
+
+- **Objective**: Support password flags for CLI automation and CI/CD usage, plus password recovery functionality.
+- Added `--password` / `-p` flag to decrypt command that overrides file and 1password-based passwords
+- Added `--write` / `-w` flag that when used with `--password` writes the password to storage after successful decryption
+- Added `--password` flag support to add and encrypt commands to skip interactive password prompts
+- Includes confirmation prompts for overwriting existing passwords in both file and 1Password storage modes
+- Full test coverage and documentation updates included
 
 ### Single Folder for Git Vault
 
