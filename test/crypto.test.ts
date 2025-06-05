@@ -510,11 +510,11 @@ Deno.test({
       await Deno.remove(testFile)
 
       // Mock user confirmation for overwriting password
-      let confirmCalled = false
-      const originalConfirm = terminal.createConfirm
+      let _confirmCalled = false
+      const _originalConfirm = terminal.createConfirm
       terminal.createConfirm = (message: string, defaultValue = false) => {
         if (message.includes('Overwrite existing password file')) {
-          confirmCalled = true
+          _confirmCalled = true
           return true
         }
         return defaultValue

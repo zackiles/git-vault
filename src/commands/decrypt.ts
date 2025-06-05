@@ -17,7 +17,7 @@ import type {
   GitVaultConfig,
   ManagedPath,
 } from '../types.ts'
-import { readGitVaultConfig, writeGitVaultConfig } from '../utils/config.ts'
+import { readGitVaultConfig } from '../utils/config.ts'
 import { DEFAULT_1PASSWORD_VAULT } from '../constants.ts'
 import { PATHS } from '../paths.ts'
 
