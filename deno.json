@@ -1,6 +1,6 @@
 {
   "name": "@zackiles/git-vault",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Drop-dead simple solution for sharing sensitive things in git repositories.",
   "tasks": {
     "dev": "DENO_ENV=development deno run -A src/cli.ts",
