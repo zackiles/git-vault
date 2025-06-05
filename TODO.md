@@ -12,10 +12,6 @@ Investigate supporting Symmetric Keys for Git-Vault. Borrow inspiration from the
 
 If the `add` command detects a JSON or YAML file it will prompt a user to ask if they want to encrypt just the values of all fields in the file when storing it in the vault, or do a full file encryption.
 
-### 3 ) Field Encryption For JSON and YAML
-
-If the `add` command detects a JSON or YAML file it will prompt a user to ask if they want to encrypt just the values of all fields in the file when storing it in the vault, or do a full file encryption.
-
 ### 4 ) CI/CD Workflow Integration
 
 - **Objective**: Provide automated CI/CD workflow templates for unsealing vaulted items in GitHub Actions.
@@ -37,9 +33,9 @@ If the `add` command detects a JSON or YAML file it will prompt a user to ask if
 
 Add and remove command should accept glob patterns. config.json should handle mappings from archive back to paths.
 
-### 6. Passing Passwords as Flags / ENV
+### 6. Passing Passwords as ENV
 
-To assist in CI usage (NOTE: See TODO `#4 CI/CD Workflow Integration`) we should allow decryption of repo assets using only a flag and environment variable instead of a pwd file.
+To assist in CI usage (NOTE: See TODO `#4 CI/CD Workflow Integration`) we should allow decryption of repo assets using only a environment variable instead of a pwd file. You'll need to investigate an idiomatic pattern for passing potentially multiple passwords to support repos that have multiple file/folders encrypted.
 
 ### 7. Recovery Modes
 
