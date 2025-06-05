@@ -1,0 +1,477 @@
+# RFC: Deno 2 Field-Level Encryption Engine
+
+## Introduction
+
+This RFC proposes a **field-level encryption and decryption engine** for configuration files in Deno 2. The engine leverages Deno's native Web Cryptography API and standard libraries to securely encrypt or decrypt individual fields within structured files (JSON, YAML, `.env`, and INI). The goal is to protect sensitive configuration values (passwords, API keys, secrets) at rest by replacing them with ciphertext in the file, while allowing authorized decryption when needed.
+
+Key features of the design include:
+
+* **AES-GCM** symmetric encryption (256-bit key) for authenticated encryption of field values, as it is a widely adopted and secure encryption mode.
+* **HKDF (HMAC-based Key Derivation Function)** using SHA-256 to derive the AES encryption key from a master secret, adding an extra layer of security and flexibility.
+* A **custom JSON-based key file format** to store the symmetric key material (and parameters like salt) used for encryption/decryption. This key is kept outside the config files (e.g. in the repository but not in plaintext config), and is provided to the engine via the surrounding CLI or environment.
+* Support for **structured file formats** (JSON, YAML, .env, INI) without reinventing parsing or serialization. The implementation uses Deno's official `@std/` libraries for handling these formats, such as YAML parse/stringify, dotenv parse/stringify, and INI parse/stringify. This ensures we do not reimplement functionality already available in the standard library.
+* Focus on the **core encryption/decryption methods** given a file and key. The CLI aspects (argument parsing, file I/O, user prompts) are outside the scope of this RFC. We assume the CLI or environment will handle providing the key and choosing which fields to encrypt or decrypt.
+
+By using Deno 2's stable standard library and WebCrypto API, this engine avoids external dependencies and aligns with modern Deno usage patterns. The design is inspired by existing secrets management tools (for example, Mozilla SOPS supports YAML, JSON, ENV, INI with various encryption backends) but is built specifically for Deno runtimes using symmetric encryption and optional future extensions.
+
+## Use Cases and Motivation
+
+Storing configuration files in source control is common, but embedding sensitive credentials in plaintext is a security risk. Field-level encryption allows developers to **check in “mostly plaintext” config files** where only the sensitive values are encrypted. For example, a YAML config might have an API password field encrypted while leaving other fields readable. This approach offers several benefits:
+
+* **Security:** Encrypted secrets cannot be understood if the config file is leaked or viewed by unauthorized parties. Only someone with the decryption key can recover the actual values.
+* **Granularity:** Only specific fields (e.g. `db.password`, `API_KEY`, etc.) are encrypted, so the rest of the config remains diff-friendly and human-readable. This is better than whole-file encryption when most of the file is non-sensitive.
+* **Integration:** The engine can be used in development, CI/CD, and production flows. Developers can encrypt secrets before committing. CI/CD pipelines can decrypt values at build or deploy time using the provided key, injecting secrets without exposing them in plaintext in the repo.
+
+The motivation is to provide a **Deno-native solution** for this problem. By using WebCrypto and Deno std libraries, we ensure compatibility and security without needing third-party modules. Deno 2’s emphasis on a stable standard library makes this feasible – for instance, we can parse and write YAML or .env files using official modules instead of custom code. The engine will make it easier to manage secrets in Deno projects, complementing existing tools but within the Deno ecosystem.
+
+## Design Overview
+
+### Encryption Algorithm and Key Derivation
+
+The core cryptographic approach is:
+
+* **AES-256-GCM** for encryption: AES-GCM provides confidentiality and authenticity (integrity) for the encrypted field values. GCM mode produces a ciphertext and an authentication tag. If a ciphertext is tampered with, decryption will fail authentication. We choose a 256-bit key for strong security. AES-GCM is recommended for modern applications and is well-supported by WebCrypto.
+* **HKDF with SHA-256** for key derivation: Rather than using a raw symmetric key directly, the engine derives the actual AES key using HKDF. HKDF (HMAC-based Key Derivation Function, RFC 5869) takes a high-entropy input key material (IKM) and produces one or more pseudorandom keys. In our design, the IKM is the secret from the key file, and we derive a 256-bit AES key from it using a salt and optional context info. This adds an extra layer: even if the master key is known, the derived key can be tied to context. It also paves the way for deriving multiple keys or integrating an ECDH secret in the future.
+
+**Initialization Vector (IV):** Each encryption operation will use a **random 96-bit (12-byte) IV** for AES-GCM. A new IV is generated for every field value encrypted. IVs do not need to be secret, but **must be unique** for each encryption under the same key. Using Deno's WebCrypto, we will generate IVs with `crypto.getRandomValues(new Uint8Array(12))`. The IV will be prepended or stored alongside the ciphertext so that it can be used for decryption.
+
+**Authenticated Associated Data (AAD):** (Optional) AES-GCM allows additional associated data to be authenticated but not encrypted. In this initial design we do not utilize AAD, but future versions could include field context (such as the field name or file name) as AAD to bind ciphertext to a specific context. This would prevent encrypted values from being copied to a different field or file without detection. For now, we keep it simple and focus on encrypting the values themselves.
+
+### Key File Format (`.key` file)
+
+We define a JSON-based format for the symmetric encryption key. This key file is intended to reside in the repository (or a secure location) but separate from the config files. It encapsulates all information needed to derive the working encryption key. Storing it as JSON allows easy parsing in Deno and potential extension with additional fields. The key file format (version 1) could be as follows:
+
+```json
+{
+  "version": 1,
+  "algorithm": "AES-256-GCM",
+  "kdf": "HKDF-SHA256",
+  "salt": "mNv8sM...==",     // base64-encoded salt used for HKDF
+  "info": "DenoConfig",    // optional context info for HKDF (UTF-8 string)
+  "keyMaterial": "w4Z8kP...=="  // base64-encoded master key material (IKM)
+}
+```
+
+* **`version`:** Format version of the key file (for future evolution).
+* **`algorithm`:** The symmetric encryption algorithm. In v1, always `"AES-256-GCM"`.
+* **`kdf`:** The key derivation function. `"HKDF-SHA256"` indicates we use HKDF with SHA-256 as the hash.
+* **`salt`:** A base64 string of a random salt. This salt is used in HKDF derivation. It should be generated once when the key file is created. Salt does *not* need to be secret, but it should be unpredictable and unique per key file. Using a consistent salt means the derived AES key will be the same for this key file every time (assuming the same info), which is convenient for reuse. (If the salt were to change each time, we would need to store it with each ciphertext; here we choose a fixed salt per key file to derive a stable key.)
+* **`info`:** An optional context/application string for HKDF. This can be used to distinguish keys (e.g., `"DenoConfig"` or `"prod-config"`). It is fed into HKDF but not secret. In many cases this can be left as a default constant. Including an info field ensures HKDF outputs are context-bound; for example, one could use different info values for different environments or purposes.
+* **`keyMaterial`:** The master key material, base64-encoded. This is the secret seed for key derivation. It should be a cryptographically random byte sequence of sufficient length (e.g. 32 bytes for 256-bit security). This is effectively the "password" or base secret that must be kept secure. The engine will derive the actual AES key from this. By storing it in base64, we keep the key file JSON human-portable (though the value itself is high-entropy noise).
+
+**Key Generation:** To create a new key file, a developer or tool would generate a random 32-byte secret and a random salt, then save them in this JSON structure. This file should be treated as sensitive (shared only with those who need to decrypt). It can be checked into a private repo or distributed via secure channels to the CI systems and developers. The assumption in this RFC is that the key file is available to the encryption engine at runtime (passed in by a CLI or through environment variables). We do not cover interactive key prompts or key storage best practices here, but in real usage the key might be provided via `Deno.readTextFile` from a secure path or injected as an environment secret in CI.
+
+### Encrypted Value Format in Files
+
+Within the structured config files, an encrypted field's value will be replaced with a marker string that clearly indicates it is encrypted. We define a notation for this to allow the engine to recognize and parse encrypted values. The format for an encrypted value is:
+
+```
+ENC[v1:<ciphertext>]
+```
+
+Here, `ENC` is a constant prefix to denote an encrypted value, and `v1` indicates the version of the encryption scheme/format. The part after the colon is the base64-encoded ciphertext data. This ciphertext encoding will itself contain the IV and the actual AES-GCM output. In version 1, we propose to concatenate the IV and the AES-GCM ciphertext (including the authentication tag) and then base64-encode the whole blob. Thus:
+
+* The first 12 bytes of the decoded blob correspond to the IV.
+* The remaining bytes correspond to the ciphertext + 16-byte GCM authentication tag.
+
+When decrypting, the engine will decode the base64, split the IV and ciphertext, and call the decrypt function. By including `v1` in the marker, we allow future changes in format (for example, `v2` might indicate a different algorithm or inclusion of an ECDH ephemeral public key, etc.). The `ENC[...]` wrapper also makes it obvious in the config file which values are encrypted, and ensures that encrypted values are treated as strings by JSON/YAML parsers.
+
+**Example:** A YAML file before encryption:
+
+```yaml
+database:
+  user: alice
+  password: mysecretpassword
+apiKey: 12345
+```
+
+After field-level encryption (targeting `password` and `apiKey`):
+
+```yaml
+database:
+  user: alice
+  password: ENC[v1:Base64IVCipherText...]
+apiKey: ENC[v1:Base64IVCipherText...]
+```
+
+The exact base64 strings would be the IV+ciphertext for each field encrypted with the derived key. The `ENC[v1:]` makes it clear these are encrypted. In an `.env` file, it might look like:
+
+```
+DB_USER=alice
+DB_PASSWORD=ENC[v1:...base64...]
+API_KEY=ENC[v1:...base64...]
+```
+
+In JSON:
+
+```json
+{
+  "database": {
+    "user": "alice",
+    "password": "ENC[v1:...]"
+  },
+  "apiKey": "ENC[v1:...]"
+}
+```
+
+The engine will handle adding and removing these markers appropriately.
+
+### Field Selection for Encryption/Decryption
+
+This RFC focuses on the mechanism, not the policy, of which fields to encrypt. In practice, the calling code or CLI would specify which fields/keys should be encrypted. For example, a CLI could allow patterns or a list of JSON/YAML paths (like `database.password`, `apiKey`) to encrypt. The engine itself can provide utilities to walk through an object and encrypt specified keys. We assume the following approach:
+
+* For **JSON/YAML** (parsed into objects): The engine can traverse the object recursively. If a key matches one of the target field names or patterns (case-insensitive match, or regex if advanced), and the value is a scalar (string/number), it will encrypt that value. The `@std/regexp` module can be utilized to safely construct or apply regex patterns if needed (for example, escaping user inputs in regex). In simple cases, exact key names like `"password"` or names containing `"secret"` can be matched. The engine will likely expose an API where the caller can pass a list of keys or a callback function to decide which values to encrypt.
+* For **.env/INI** (parsed into flat key-value or section-based maps): The engine can similarly iterate over the entries. Environment variable names to encrypt might be specified explicitly (e.g., `DB_PASSWORD`, `API_KEY`). INI files may have sections, so the specification could include section-qualified keys or patterns. For instance, one might encrypt any key named "password" in any section.
+
+By separating the selection logic from the encryption mechanism, we keep the core engine flexible. In this RFC, we illustrate encryption of certain obvious sensitive keys, but the exact selection can be configured externally. The **decryption** process will naturally attempt to decrypt any value that has the `ENC[v1:...]` format (since that clearly indicates an encrypted field). This means decryption can be done without prior knowledge of which fields were supposed to be encrypted – it’s driven by the markers present in the file.
+
+## Detailed Specification
+
+### Encryption Workflow
+
+The encryption process can be implemented as a function (e.g. `encryptConfig`) that takes in plaintext config data (or a path to a file) and the key file data, and outputs the encrypted file content. Below is an outline of the encryption logic with TypeScript examples using Deno 2 APIs:
+
+1. **Load and parse the key:** Load the JSON key file (if not already in memory). For example:
+
+   ```ts
+   const keyJson = JSON.parse(await Deno.readTextFile("secret.key"));
+   ```
+
+   Extract the fields: `keyMaterial` (base64 string), `salt` (base64 string), and `info` (string, if present). Decode the base64-encoded key material and salt into `Uint8Array` bytes:
+
+   ```ts
+   import { decodeBase64 } from "@std/encoding"; // Deno std base64 decoder:contentReference[oaicite:15]{index=15}
+
+   const rawKey = decodeBase64(keyJson.keyMaterial);
+   const salt = decodeBase64(keyJson.salt);
+   const info = keyJson.info ? new TextEncoder().encode(keyJson.info) : new Uint8Array();
+   ```
+
+   We now have the raw key bytes and salt bytes.
+
+2. **Import the raw key and derive the AES key with HKDF:** Using the Web Crypto API, import the raw key material as a CryptoKey for HKDF, then derive the AES-GCM key. Deno 2's WebCrypto is accessible via the global `crypto.subtle` interface. For HKDF, the base key is imported with the algorithm name `"HKDF"` and usage `"deriveKey"`:
+
+   ```ts
+   const ikmKey = await crypto.subtle.importKey(
+     "raw",
+     rawKey,
+     { name: "HKDF" },
+     false,
+     ["deriveKey"]
+   );
+   const derivedKey = await crypto.subtle.deriveKey(
+     { name: "HKDF", salt: salt, info: info, hash: "SHA-256" },
+     ikmKey,
+     { name: "AES-GCM", length: 256 },
+     false,
+     ["encrypt", "decrypt"]
+   );
+   ```
+
+   In this call, we use the salt and info from the key file, and specify that we want to derive an AES-GCM key of 256 bits. The resulting `derivedKey` is a CryptoKey that can be used for encryption. (We mark it as non-extractable for security, since we don't need to export it – the master key remains the source of truth.) All cryptographic operations from here on will use `derivedKey`.
+
+3. **Parse the configuration file into an object structure:** Depending on the file format:
+
+   * **JSON:** Use `JSON.parse` on the file text (since JSON is natively supported in JS).
+   * **YAML:** Use the Deno std YAML module. For example, `import { parse as parseYaml, stringify as stringifyYaml } from "jsr:@std/yaml";`. Then `const configObj = parseYaml(fileText);` to get a JavaScript object.
+   * **ENV (.env):** Use Deno's dotenv utility. Example: `import { parse as parseEnv, stringify as stringifyEnv } from "@std/dotenv";`. Then `const envObj = parseEnv(fileText);` which returns an object mapping keys to values.
+   * **INI:** Use the INI module. Example: `import * as ini from "@std/ini";` then `const iniObj = ini.parse(fileText);`. The INI parser will likely return an object where section names become nested objects. (Comments are skipped by default in parsing.) We will handle nested sections if present.
+
+   Using standard library parsers ensures robust handling of each format (for instance, YAML anchors, or `.env` quoting rules) with no custom reimplementation. The parse result in all cases is a JavaScript object/structure that we can traverse.
+
+4. **Traverse and encrypt target fields:** We walk through the parsed object and locate the fields that need encryption. This can be done with a recursive function or iterative approach. Pseudocode:
+
+   ```ts
+   function encryptFields(obj: any): void {
+     for (const [key, value] of Object.entries(obj)) {
+       if (value && typeof value === "object") {
+         // Recurse into nested objects (for JSON/YAML or INI sections)
+         encryptFields(value);
+       } else if (shouldEncryptField(key, value)) {
+         // Encrypt this field's value
+         const plainText = typeof value === "string"
+                             ? value
+                             : String(value);
+         const encryptedStr = encryptValueToString(plainText);
+         obj[key] = encryptedStr;
+       }
+     }
+   }
+   ```
+
+   The `shouldEncryptField` function encapsulates the logic of whether a given key should be encrypted. This could be a simple name check or regex match (e.g., return true for keys like `"password"`, `"secret"`, etc., or keys explicitly configured). It can also inspect the value type (we may only encrypt string or number types; other complex types usually wouldn't be "secrets"). For our RFC, assume we have a predetermined set or pattern of sensitive keys. In a real implementation, this might be configurable by the user of the library.
+
+   The core operation is `encryptValueToString(plainText)`. Here's how that function works:
+
+   * Take the plaintext string and encode it as bytes (Uint8Array) using UTF-8.
+
+     ```ts
+     const data = new TextEncoder().encode(plainText);
+     ```
+
+   * Generate a random 12-byte IV:
+
+     ```ts
+     const iv = crypto.getRandomValues(new Uint8Array(12));
+     ```
+
+     This uses the Web Crypto RNG to get 12 secure random bytes. Each call produces a different IV.
+
+   * Use `crypto.subtle.encrypt` with AES-GCM:
+
+     ```ts
+     const cipherBuffer = await crypto.subtle.encrypt(
+       { name: "AES-GCM", iv: iv },
+       derivedKey,
+       data
+     );
+     ```
+
+     This returns an ArrayBuffer containing the ciphertext concatenated with the 16-byte GCM authentication tag. WebCrypto's AES-GCM implementation appends the tag to the ciphertext by default.
+
+   * Build the output byte array that includes the IV. We can simply concatenate the IV and the cipherBuffer bytes. For example:
+
+     ```ts
+     const ivAndCipher = new Uint8Array(iv.byteLength + cipherBuffer.byteLength);
+     ivAndCipher.set(iv, 0);
+     ivAndCipher.set(new Uint8Array(cipherBuffer), iv.byteLength);
+     ```
+
+     Now `ivAndCipher` contains \[IV || ciphertext || tag].
+
+   * Base64-encode this combined data:
+
+     ```ts
+     const cipherBase64 = encodeBase64(ivAndCipher);
+     ```
+
+     Using Deno's encoding utility, we convert the bytes to a base64 string.
+
+   * Format the final string with our marker:
+
+     ```ts
+     return `ENC[v1:${cipherBase64}]`;
+     ```
+
+   Putting it together, `encryptValueToString` will produce a string like `ENC[v1:SGVsbG8gd29ybGQh...]` for a given plaintext. That string is what we assign back into the object in place of the original plaintext value.
+
+5. **Serialize the object back to file format:** After processing all fields, we convert the modified object back into the original file format:
+
+   * For JSON: use `JSON.stringify(obj, null, 2)` to produce a nicely indented JSON string (2-space indentation). We might also ensure it ends with a newline.
+   * For YAML: use `stringifyYaml(obj)` from the std YAML module. This will produce a valid YAML string. (The encrypted values will just appear as normal scalars. If they contain special characters, the YAML library will likely quote them appropriately. Our `ENC[...]` format is pretty YAML-friendly as it starts with a letter, so it should be treated as a string automatically.)
+   * For .env: use `stringifyEnv(obj)` from std dotenv. This will output lines in `KEY=value` format. Notably, the dotenv stringify will add quotes if needed, for example if the value contains spaces. Our `ENC[...]` values might contain `+` or `/` or `=` from base64, which are not whitespace, so they may not need quoting. But even if quotes are added, it’s fine – the decryptor should handle a value enclosed in quotes as well (the parse function would return the raw string without quotes).
+   * For INI: use `ini.stringify(obj)`. The std INI module will serialize an object back into INI format. Section objects will be turned into \[section] blocks again, and keys assigned. Since our encrypted values are strings with brackets and colons, we should ensure the INI writer handles them. According to the INI spec, characters like `:` and `[` in values are allowed and do not need special escaping (brackets are usually only special in section headers). The std library will likely quote or handle any necessary escaping. In our example with `ENC[v1:...]`, it should be output as is in the value part.
+
+6. **Output or save the encrypted text:** The resulting string can be returned from the function, or written to a file. For example, the CLI might call `encryptConfig("config.yaml", key)`, get the string, then write it to `config.yaml.encrypted` or overwrite the original file as appropriate. (CLI concerns like whether to inline replace or create a new file are outside this RFC’s focus, but the engine simply provides the transformed content.)
+
+**Example Usage:**
+
+Suppose we have a YAML config file `app.yml` and we want to encrypt the `db.password` and `apiKey` fields. The process in code might look like:
+
+```ts
+import { parse as parseYaml, stringify as stringifyYaml } from "jsr:@std/yaml";
+import { encodeBase64, decodeBase64 } from "@std/encoding";
+import * as ini from "@std/ini";
+import * as dotenv from "@std/dotenv";
+
+// ... (imagine we've imported the crypto key derivation code or have it in this file)
+
+const fileText = await Deno.readTextFile("app.yml");
+let data = parseYaml(fileText);
+
+// Encrypt certain fields:
+encryptFields(data);  // this will modify `data` in place, encrypting target values
+
+const newYamlText = stringifyYaml(data);
+await Deno.writeTextFile("app.yml", newYamlText);
+console.log("Encrypted fields and wrote back to app.yml");
+```
+
+Where `encryptFields` internally uses the `encryptValueToString` method described. After running this, any specified sensitive fields in `app.yml` would be replaced with `ENC[v1:...]` ciphertext strings. A developer reviewing the file would see ciphertext instead of plaintext secrets. Only someone with the `secret.key` (and the passphrase to use the engine) could decrypt those fields.
+
+### Decryption Workflow
+
+Decryption is essentially the reverse of encryption. The engine will scan for the `ENC[v1:...]` pattern in the parsed data and restore the original plaintext values. The workflow for a `decryptConfig` function:
+
+1. **Load and derive the key:** The same steps as encryption – read the key file, import the raw key, and derive the AES-GCM key via HKDF. Decryption uses the *same derived key* and salt, so the key file must be the one corresponding to how the data was encrypted. (If keys don't match, decryption will fail authentication.)
+
+2. **Parse the encrypted file:** Use the appropriate parser (`JSON.parse`, `parseYaml`, `dotenv.parse`, `ini.parse`) to get the data structure. Note: The encrypted values will currently be in the form of strings like `"ENC[v1:...]"` in that structure (or in the case of dotenv, the values will include the `ENC[v1:...]` substring as part of the string).
+
+3. **Traverse and decrypt fields:** Walk through the object similar to encryption. This time, we look for values that are strings and match the encrypted pattern. For example:
+
+   ```ts
+   function decryptFields(obj: any): void {
+     for (const [key, value] of Object.entries(obj)) {
+       if (value && typeof value === "object") {
+         decryptFields(value);
+       } else if (typeof value === "string" && value.startsWith("ENC[v1:")) {
+         obj[key] = decryptValueFromString(value);
+       }
+     }
+   }
+   ```
+
+   We identify encrypted fields by the prefix `ENC[v1:`. (A robust implementation might use a regex like `/^ENC\[v(\d+):(.*)\]$/` to capture version and content. The `@std/regexp.escape` utility could assist if we needed to dynamically build regex, but here a fixed pattern is fine.) We then call `decryptValueFromString(value)` which handles the actual cryptography.
+
+4. **Decrypt an individual value:** For a given encrypted string `encStr` like `"ENC[v1:...base64...]"`:
+
+   * Parse the string to extract the base64 ciphertext portion. We know it starts with `ENC[v1:` and ends with `]`. We can do:
+
+     ```ts
+     const base64Data = encStr.slice(6, -1);
+     // (Slice from index 6 to -1 removes 'ENC[v1:' and the trailing ']')
+     ```
+
+     This yields the base64 substring. (In a more general approach, one could use regex to parse the version number if needed, and ensure it’s v1.)
+
+   * Decode the base64 to bytes:
+
+     ```ts
+     const encryptedBytes = decodeBase64(base64Data);
+     ```
+
+     Now `encryptedBytes` is a Uint8Array containing IV(12 bytes) + ciphertext+tag.
+
+   * Split IV and ciphertext:
+
+     ```ts
+     const iv = encryptedBytes.slice(0, 12);
+     const cipherBytes = encryptedBytes.slice(12);  // this includes the 16-byte tag at end
+     ```
+
+   * Call WebCrypto `decrypt`:
+
+     ```ts
+     const decryptedBuffer = await crypto.subtle.decrypt(
+       { name: "AES-GCM", iv: iv },
+       derivedKey,
+       cipherBytes
+     );
+     ```
+
+     We use the same derived AES key from earlier. If the data or key is wrong or the ciphertext was corrupted, this call will throw an `OperationError` due to authentication failure. Assuming it succeeds, we get an ArrayBuffer of plaintext bytes.
+
+   * Decode plaintext bytes to string:
+
+     ```ts
+     const plaintext = new TextDecoder().decode(decryptedBuffer);
+     ```
+
+     This yields the original string that was encrypted. (If the original was a number or other type, we get its string form. Note that since our encryption turned everything into a string, by default we will get back string values. The user of the engine can decide if they want to cast, e.g. if they know a field is supposed to be a number, they can parse it. The engine could be extended to remember type info, but that complicates things. In general, config secrets are often strings like passwords or keys, so this is fine.)
+
+   * Return the plaintext string, which the `decryptFields` function will assign back into the object.
+
+5. **Output the decrypted data:** At this point, the `obj` structure has plaintext in all the formerly encrypted fields. If this is being used at runtime (for example, to load config into an application), we may not need to serialize it back to a file – the object in memory can be used directly. If the goal was to produce a fully decrypted file for inspection, we can stringify it just like in encryption: using JSON.stringify, YAML stringify, etc., which would now output the sensitive values in plaintext. (Such full plaintext output should be handled carefully, as it defeats the encryption if stored insecurely – but it can be useful for a one-time review or verification by an authorized user.)
+
+**Example:** If we decrypt the earlier example file, the engine would find `password: ENC[v1:...]` and `apiKey: ENC[v1:...]`, and replace them with `password: mysecretpassword` and `apiKey: 12345` in the object. After serialization, the YAML would look just like it did pre-encryption.
+
+One can integrate decryption in a CI pipeline by reading the encrypted file, running `decryptConfig` with the key, and then supplying the resulting object to the application or writing a temp config file for the application to use. The encryption markers ensure that if the key is wrong or missing, the fields remain encrypted (so the app would either fail to connect or see gibberish, which is better than an insecure secret leak).
+
+### Error Handling and Edge Cases
+
+* If a field marked as encrypted (ENC\[v1:...]) cannot be decrypted (e.g., wrong key or data corrupted), the `crypto.subtle.decrypt` will throw an error. The engine should propagate this as a decryption failure for that field (and likely stop further processing, since it indicates a serious issue like incorrect key).
+* Fields that are not marked will be left unchanged during decryption. During encryption, fields not in the target list remain unchanged. This way, the engine is non-destructive to unrelated data.
+* Re-encrypting an already encrypted field should either be a no-op or explicitly disallowed to avoid double encryption. The engine could warn if it encounters an `ENC[...]` value during encryption and skip it, presuming it's already encrypted. Similarly, decrypting a plaintext field just returns it as is.
+* The design assumes that the key file is the correct one for the file. If multiple different keys are used for different fields or files, the caller must provide the correct key for each context. (Future enhancements might include key identifiers in the encrypted string, but v1 keeps it simple: one key used per operation on a file or set of fields.)
+* **Performance:** Field-level encryption is typically dealing with small strings (passwords, tokens). The overhead of WebCrypto and base64 encoding is minimal for such sizes. We derive the AES key once per file operation, which is efficient. Parsing and stringifying YAML/JSON is likely the heavier operation than the cryptography for typical config sizes, and those libraries are optimized in native code or well-tested JS.
+
+## Example Scenario
+
+To illustrate end-to-end, consider a `.env` file containing environment variables. We want to encrypt the `API_TOKEN` and `DB_PASSWORD` entries:
+
+**Original `.env`:** (*before encryption*)
+
+```
+API_TOKEN=supersecret123
+DB_PASSWORD=Pa$$w0rd
+ENVIRONMENT=development
+```
+
+**Encryption call:** The CLI calls `encryptConfig("config.env", key)`. Internally:
+
+* Parses to `{ API_TOKEN: "supersecret123", DB_PASSWORD: "Pa$$w0rd", ENVIRONMENT: "development" }` using `dotenv.parse`.
+* Encrypts the first two fields (perhaps by matching keys ending in "TOKEN" or "PASSWORD"): generates IVs and ciphertexts for `"supersecret123"` and `"Pa$$w0rd"`.
+* Replaces those values with, say, `ENC[v1:abc123...]` strings.
+* Stringifies with `dotenv.stringify` to ensure proper formatting (quotes, escaping). The output might be:
+
+```
+API_TOKEN=ENC[v1:BaSe64Enc...==
+DB_PASSWORD=ENC[v1:YXVqMTIz...==
+ENVIRONMENT=development
+```
+
+Notice the third line remains plaintext. The encrypted lines might get quotes added if they contain special characters, but in this case they likely appear as unquoted strings. This file can be committed to git.
+
+**Decryption in CI:** The pipeline pulls the repo, reads the file and the `secret.key`, and calls `decryptConfig` on it. The parse yields the object with encrypted strings. The engine spots those and decrypts them with the key. The resulting object might be:
+
+```json
+{ "API_TOKEN": "supersecret123", "DB_PASSWORD": "Pa$$w0rd", "ENVIRONMENT": "development" }
+```
+
+The CI can then load these into environment variables for a deploy, without ever having the secrets stored in plaintext in the repo or on disk permanently. After use, the plaintext can be discarded from memory.
+
+## Future Considerations
+
+### Asymmetric Key Support (Layered Encryption)
+
+While this RFC focuses on symmetric encryption with a shared key, a logical evolution is to incorporate **asymmetric encryption** to secure the symmetric key or to allow multiple parties to encrypt/decrypt without sharing a raw symmetric secret. A future version could introduce support for **ECDH key exchange or hybrid encryption** as follows:
+
+* **Public/Private Key Encryption via ECDH:** We could allow the key file to contain an **asymmetric key pair or a public key** instead of (or in addition to) a symmetric key. For example, the key file might have:
+
+  ```json
+  {
+    "version": 2,
+    "algorithm": "X25519-AES-GCM",
+    "publicKey": "<base64 X25519 public key>",
+    "privateKey": "<base64 X25519 private key>"  // maybe stored separately for security
+  }
+  ```
+
+  In a likely scenario, only the **public key** would be stored in the repository (since public keys are not secret). The corresponding private key would be kept by the consumer (e.g., CI pipeline or an ops team member). Encryption would work by generating an ephemeral ECDH key pair for the session: the engine would use the recipient's public key (from the file) and its own freshly generated private key to perform an ECDH key agreement. This produces a shared secret. We would then use HKDF on that shared secret (with a salt and info) to derive an AES-GCM key. The engine would encrypt the fields with that AES key. **Additionally,** the engine would need to include the ephemeral public key it used in the output (so that the holder of the private key can do the same ECDH).
+
+  Concretely, an encrypted value in such a scheme might look like:
+
+  ```
+  ENC[v2:<ephemeralPubKeyBase64>::<ciphertextBase64>]
+  ```
+
+  The presence of an ephemeral public key (and a new version tag v2) tells the decryptor to perform ECDH: it would use its *own* private key (not in the repo, but provided at decrypt time) and the ephemeral public key from the data to derive the shared secret, then derive the AES key and decrypt the ciphertext. This approach means the symmetric key is different for every encryption operation (as ephemeral keys differ), and only someone with the private key can decrypt, removing the need to share a symmetric key file at all. It effectively **layers asymmetric encryption over our symmetric engine** – using ECDH to protect the symmetric key derivation.
+
+* **Multiple Recipients:** Asymmetric support can enable encrypting for multiple recipients. For example, one could encrypt the same field value with multiple public keys (e.g., one for a production CI system, one for a development environment), embedding each encrypted blob for each recipient. This increases file size, but ensures that different holders can decrypt with their own key. A simpler approach is to have different config files or key files per environment, which is often acceptable.
+
+* **RSA or Other Algorithms:** Another possible addition is support for RSA-OAEP encryption of a data key. For instance, one might generate a random AES data key to encrypt the fields, then encrypt that AES key with an RSA public key. Tools like SOPS use a variant of this concept with KMS/PGP. In our framework, we could incorporate RSA as a means to encrypt the symmetric `keyMaterial` itself, rather than using ECDH for a shared secret. However, RSA adds complexity (key management, potential size limitations, etc.) and ECDH with X25519 (Curve25519) or P-256 is more modern and efficient for our use case.
+
+* **Integration with WebCrypto:** Deno’s WebCrypto supports ECDH (e.g., using `deriveKey` with ECDH and HKDF) and RSA-OAEP, so we can implement these without external libraries. The design just needs to carefully handle how to include the necessary metadata (like ephemeral keys or wrapped keys) in the encrypted value format. This is why having a version tag in the `ENC[]` format is useful. Future versions might include JSON in the brackets for more complex schemes, but that would make the config less readable. A compromise is to keep it compact (as shown with double colons or similar separators within the base64 string, or a fixed-length prefix for an ephemeral key).
+
+In summary, future versions could allow an **optional asymmetric layer**, where the repository stores only a public key. This way, even if the repo is public, no secret is exposed – only those with the corresponding private key can decrypt. We foresee this as an extension to the same framework, reusing the AES-GCM + HKDF core but simply obtaining the symmetric key via a different route.
+
+### CI/CD Pipeline Integration
+
+This encryption engine is designed to be automation-friendly. In a CI/CD pipeline, we might integrate it as follows:
+
+* **Secret Injection:** Store the `secret.key` (symmetric key file) or the private key (for asymmetric mode) in the CI system's secure secret storage. For example, in GitHub Actions or Jenkins, one would add a secret variable for the key (or the key file content). The pipeline script can retrieve this and provide it to the Deno tool at runtime. This avoids storing the actual key in the repository.
+
+* **Build Step Decryption:** Early in the pipeline, after checking out code, a step runs `deno run` with a script that uses `decryptConfig` on the needed files (or perhaps the application itself calls the decrypt function at startup). This yields plaintext config values in memory, which can then be used to, say, populate environment variables or config files that are fed to the application or deployment scripts. Because the decryption happens in a controlled environment (CI runner or server) and the key is not exposed elsewhere, the secrets remain protected.
+
+* **Encryption of new secrets:** If a secret value needs to be updated, a developer can run a CLI command locally like `deno run encrypt.ts --field=db.password --in=config.yaml --out=config.yaml`. This would prompt for the plaintext or take it from an input, then output the updated file with that field encrypted. By using this engine, the encryption is done with the same method every time. This could be integrated with a company’s secret management workflow. For example, rotation of a password would involve updating the plaintext in a secure way and re-encrypting it in the config file using the shared key. The RFC's engine ensures that as long as the same key file is used, the decryption in CI will continue to work.
+
+* **Secrets as Code:** This approach fits into “secrets as code” philosophy (similar to tools like SOPS). The encrypted config files can be code-reviewed and stored alongside application code, without exposing sensitive data. Only the encrypted form is visible, and changes to secrets are auditable (you can see that a secret changed, even if you can’t see its value). The actual secret values can be restricted to those with access to the key. This can be combined with branch protections or deployment approvals in CI (e.g., require a maintainer to provide a decryption key at deploy time if needed).
+
+* **Integration with Deno Deploy or runtime:** In a scenario where the app is running in Deno, one could even decrypt at runtime by bundling the key (not recommended for production if the binary can be accessed, but useful for local dev). For instance, a Deno script could import the key file and call decrypt before using the config. In production, it's preferable to use environment injection as described, so that the key isn't baked into the app.
+
+### Additional Enhancements
+
+Future work could also consider:
+
+* **Support for more file formats:** The engine could be extended to TOML (Deno has `@std/toml`) or other config formats using the same pattern. The architecture of separating parse -> transform -> stringify makes it relatively straightforward to add formats as long as a std library is available.
+* **Key Rotation:** Provide a mechanism to rotate the master key. This could involve re-encrypting all fields with a new key file. A utility could be built to decrypt with the old key and re-encrypt with the new key in one step. The `version` in the encrypted markers might not even need to change if the method is the same (v1) – only the key changes. However, tracking multiple active keys might require an identifier to know which key to use for decryption. Currently, that’s not encoded (we assume one key in use at a time). A future format might embed a key ID or fingerprint if rotation without immediate re-encryption is needed.
+* **Secure Memory Handling:** Ensure that plaintext secrets are not unnecessarily kept in memory longer than needed (perhaps by zeroing out buffers after use, though in JS that is tricky due to garbage collection). Using WebCrypto means the secret keys live in CryptoKey objects which are not directly accessible to JS, adding some safety.
+* **Validation:** Unit tests should be written to ensure that encrypt -> decrypt yields the original data, and that wrong keys fail to decrypt (to catch any implementation errors). Additionally, integrating with known test vectors for AES-GCM and HKDF can validate correctness.
+
+## Conclusion
+
+This RFC outlines a robust yet flexible design for field-level encryption in Deno 2, using only native APIs and the standard library. By leveraging AES-GCM for strong encryption and HKDF for key derivation, we achieve a high level of security. The use of JSON, YAML, dotenv, and INI parsing from `@std/` libraries ensures we parse and serialize config files correctly without reinventing the wheel. The custom key format provides a clear way to manage encryption keys and parameters outside of the code.
+
+In summary, **developers can encrypt sensitive config fields with a single command and commit those files safely**, and CI/production can decrypt them on the fly with the appropriate key. The design is forward-looking: future versions can introduce public-key cryptography to remove shared secrets, and integrate smoothly with secret management workflows and CI/CD pipelines for a secure end-to-end solution for configuration secrets management in Deno projects. The result is a maintainable, Deno-native encryption solution that keeps secrets secret, while preserving the convenience of config-as-code.
+
+**Sources:** Use of AES-GCM and IV in Web Crypto; Deno Standard Library usage for YAML, dotenv, INI; HKDF key derivation example.
